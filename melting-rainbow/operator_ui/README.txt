@@ -19,6 +19,11 @@ Run it (Windows, double-click in 01_code\windows\):
   Buttons: Start / Stop, "New batch now" (ends the batch early at a recipe change), Release / Hold per batch,
   Pass / Reject per vial (overrides, marked with a pencil).
 
+Run it on the configured CSI Linux computer:
+  ./start_capture.sh
+  This launches this operator UI with the stable Vial Fill /dev/v4l/by-id path, the Linewatch-tested 640x480 MJPG
+  camera setup, automatic exposure, locked white balance, raw recording, and the included AI model.
+
 Operator in the loop (organizers' guidance, Oct 26)
   Our system can't drive the line's sorter or read its sensors yet. The line's existing Teledyne sorter compares color
   with a static, non-updatable color list and has no link to the recipe, so it sends almost every vial to the "good"

@@ -61,7 +61,13 @@ From the repo folder, with the venv active:
 
 **Linux**
 
-`python3 melting-rainbow/operator_ui/operator_app.py --camera 0 --batch-size 3 --ai-model melting-rainbow/operator_ui/pair_model.pt --out results/operator_output`
+On the configured CSI computer, use the launcher. It selects the stable Vial Fill camera, applies the tested 640×480 MJPG / automatic-exposure / locked-white-balance setup, and starts capture in this UI:
+
+`./start_capture.sh`
+
+Direct equivalent:
+
+`python3 melting-rainbow/operator_ui/operator_app.py --camera /dev/v4l/by-id/usb-4K_USB_CAMERA_HD_USB_CAMERA_01.00.00-video-index0 --batch-size 3 --ai-model melting-rainbow/operator_ui/pair_model.pt --out results/operator_output --autostart`
 
 - The terminal prints `Operator station running: http://localhost:8765`. **Leave this terminal open** — closing it stops the station.
 - The browser opens the page. If not, open a browser and go to `localhost:8765`.
@@ -70,16 +76,17 @@ From the repo folder, with the venv active:
 
 ## 4. Pick the camera
 
-Top bar: **Source = Camera**, and the box next to it is the camera number.
+Top bar: **Source = Camera**, and the box next to it is the camera number or stable Linux device path.
 
 | Box | Usually |
 |---|---|
 | `0` | the first camera on the computer (a laptop's own camera, or the only USB camera) |
 | `1` | a second camera (e.g. a USB webcam on a laptop) |
 | `2` | a third camera |
+| `/dev/v4l/by-id/...` | a stable Linux camera path that survives camera renumbering (used by `start_capture.sh`) |
 | `rtsp://...` | a network camera — paste its stream address (ask CSI staff) |
 
-Press **Start**. Under the picture it must say `recording raw video → raw_camera_….mp4` — that file is the data.
+`start_capture.sh` starts the live feed automatically. After a manual Stop, press **Start** to begin again. Under the picture it must say `recording raw video → raw_camera_….mp4` — that file is the data.
 Wrong picture → **Stop**, change the box, **Start**. Black picture / "could not open" → close other apps using the camera (Camera, Teams, Zoom), try the next number.
 
 ## 5. Line the camera up (Align)

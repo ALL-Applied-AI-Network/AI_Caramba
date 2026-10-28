@@ -27,7 +27,7 @@ Where the decisions come from (nothing tuned on video 5):
              Off if P >= 0.5. Oct 26 small-CNN model on video 5 (scored once): 0 misses, 2 false alarms.
   batches .. every N vials (default 3, like our CSI plan), or the operator presses "New batch" at a recipe change.
 """
-import argparse, csv, io, json, os, sys, threading, time, webbrowser
+import argparse, csv, io, json, os, re, sys, threading, time, webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import cv2
 import numpy as np
@@ -38,6 +38,83 @@ from demo.live_inspect import Inspector, holder_present, steady_frames, auto_ml,
 from lane2_color.detect_fills_level import LevelFillDetector, level_label, level_pct, final_level   # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+LIVE_URL_PREFIXES = ("rtsp://", "rtmp://", "http://", "https://", "udp://")
+VIDEO_DEVICE_RE = re.compile(r"^/dev/video(\d+)$")
+
+
+def is_hardware_camera(source):
+    """True for a numeric camera or a Linux V4L2 device/by-id path."""
+    value = str(source).strip()
+    return value.isdigit() or value.startswith(("/dev/video", "/dev/v4l/"))
+
+
+def is_network_camera(source):
+    return str(source).strip().lower().startswith(LIVE_URL_PREFIXES)
+
+
+def resolve_camera_index(source):
+    """Resolve a numeric or stable /dev/v4l/by-id source to /dev/videoN."""
+    value = str(source).strip()
+    if value.isdigit():
+        return int(value)
+    if not os.path.exists(value):
+        raise RuntimeError(
+            f"{value!r} does not exist - reconnect the camera or check /dev/v4l/by-id"
+        )
+    real = os.path.realpath(value)
+    match = VIDEO_DEVICE_RE.fullmatch(real)
+    if match is None:
+        raise RuntimeError(f"{value!r} resolved to {real!r}, not a /dev/videoN device")
+    return int(match.group(1))
+
+
+def open_linewatch_camera(source):
+    """Open a local camera with the proven Linewatch Vial Fill settings."""
+    index = resolve_camera_index(source)
+    cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        cap.release()
+        cap = cv2.VideoCapture(index)
+    if not cap.isOpened():
+        raise RuntimeError(
+            f"could not open {source!r} (resolved to /dev/video{index}); "
+            "check that another application is not using it"
+        )
+
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+    # Match Linewatch: let exposure and white balance settle, then freeze WB
+    # so recipe colours remain comparable while exposure stays automatic.
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+    cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+    got_frame = False
+    for _ in range(30):
+        ok, frame = cap.read()
+        got_frame = got_frame or (ok and frame is not None)
+    if not got_frame:
+        cap.release()
+        raise RuntimeError(
+            f"{source!r} (/dev/video{index}) opened but returned no frames; "
+            "check USB bandwidth and camera connections"
+        )
+
+    wb = cap.get(cv2.CAP_PROP_WB_TEMPERATURE)
+    cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+    if wb > 0:
+        cap.set(cv2.CAP_PROP_WB_TEMPERATURE, wb)
+
+    settings = {
+        "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+        "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        "fps": float(cap.get(cv2.CAP_PROP_FPS)),
+        "auto_exposure": float(cap.get(cv2.CAP_PROP_AUTO_EXPOSURE)),
+        "auto_wb": float(cap.get(cv2.CAP_PROP_AUTO_WB)),
+        "wb_temperature": float(cap.get(cv2.CAP_PROP_WB_TEMPERATURE)),
+    }
+    return cap, index, settings
 
 # ----------------------------------------------------------------------------------------------- camera alignment
 # Our measuring windows are fixed pixel spots, set for the organizers' vial-fill camera (640x480). A different camera
@@ -383,9 +460,10 @@ class Engine:
 
     # ---- loop
     def _run(self, source, speed):
-        cap = cv2.VideoCapture(int(source) if str(source).isdigit() else source)
-        live_url = str(source).lower().startswith(("rtsp://", "rtmp://", "http://", "https://", "udp://"))
-        is_file = not str(source).isdigit() and not live_url      # network camera streams count as live
+        source = str(source).strip()
+        hardware_camera = is_hardware_camera(source)
+        live_url = is_network_camera(source)
+        is_file = not hardware_camera and not live_url           # network camera streams count as live
         self.is_file = is_file
         # alignment is for OUR camera: live, or our own raw recordings of it - never the organizers' videos
         self.use_align = (not is_file) or os.path.basename(str(source)).startswith("raw_camera_")
@@ -399,12 +477,26 @@ class Engine:
                     self.log("align_loaded", detail=side)
             except Exception:
                 pass
-        self.source_text = (f"camera {source}" if str(source).isdigit() else "network camera" if live_url
-                            else os.path.basename(str(source)))
+        try:
+            if hardware_camera:
+                cap, camera_index, settings = open_linewatch_camera(source)
+                self.source_text = f"camera {source} (/dev/video{camera_index})"
+                self.log("camera_ready", detail=f"source={source} resolved=/dev/video{camera_index} settings={settings}")
+            else:
+                cap = cv2.VideoCapture(source)
+                self.source_text = "network camera" if live_url else os.path.basename(source)
+        except RuntimeError as exc:
+            self.source_text = f"camera {source}" if hardware_camera else source
+            self.state_text = str(exc)
+            self.jpeg = self._placeholder("No camera signal")
+            self.running = False
+            self.log("camera_error", detail=str(exc))
+            return
         if not cap.isOpened():
             self.state_text = f"could not open {self.source_text}"
             self.jpeg = self._placeholder("No video")
             self.running = False
+            cap.release()
             return
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         fps = fps if 1 <= fps <= 120 else 30.0
@@ -506,6 +598,7 @@ class Engine:
                 self.log("batch_done", b, "", self._batch_summary(b))
         if writer is not None:
             writer.release()
+        cap.release()
         self.state_text = "finished" if self.running else "stopped"
         self.running = False
         self.paused = False
@@ -559,7 +652,8 @@ class Engine:
                 sorter_logged=sum(1 for v in vials if v["sorter"]),
                 sorter_scrap=sum(v["sorter"] == "scrap" for v in vials))
             return dict(tally=tally, state=self.state_text, running=self.running, source=self.source_text, ai=self.ai.msg,
-                        last_source=self.last_source, paused=self.paused, is_file=self.is_file, speed=self.speed,
+                        last_source=self.last_source, camera_source=str(self.args.camera),
+                        paused=self.paused, is_file=self.is_file, speed=self.speed,
                         video_t=round(self.video_t, 1), video_len=round(self.video_len, 1),
                         detector=self.args.detector,
                         align=None if self.align is None else {**{k: v for k, v in self.align.items() if k != "M"},
@@ -660,7 +754,7 @@ def make_handler(engine):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--camera", type=int, default=0, help="camera number used when the page says 'camera'")
+    ap.add_argument("--camera", default="0", help="camera number or stable /dev/v4l/by-id path")
     ap.add_argument("--video", help="default video file for the page (e.g. vial_fill_video_5.mp4)")
     ap.add_argument("--ai-model", help="pair_model.pt from lane6_classifier/pair_model (optional)")
     ap.add_argument("--batch-size", type=int, default=3)

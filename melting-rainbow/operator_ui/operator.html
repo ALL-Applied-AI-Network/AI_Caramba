@@ -149,7 +149,7 @@ button.paused{background:var(--review-bg);color:var(--review);border-color:var(-
   <div class="controls">
     <label for="srcType">Source</label>
     <select id="srcType"><option value="camera">Camera</option><option value="video">Video file</option></select>
-    <input id="src" placeholder="0 (camera number) or path to .mp4">
+    <input id="src" placeholder="camera number, /dev/v4l/by-id path, or video file">
     <label for="bs">Vials / batch</label><input id="bs" type="number" min="1" value="3">
     <label for="sp">Speed</label><input id="sp" type="number" min="0.25" step="0.25" value="8" title="video files only">
     <button class="primary" id="startBtn">Start</button>
@@ -264,10 +264,14 @@ button.paused{background:var(--review-bg);color:var(--review);border-color:var(-
 const $ = s => document.querySelector(s);
 const post = (p, b={}) => fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)}).then(r=>r.json());
 let srcFilled = false;          // fill the Source box once from what the station last ran (video or camera)
+let configuredCamera = "0";
+function isCameraSource(src){ return /^\d+$/.test(src) || src.startsWith("/dev/"); }
 function showSource(src){
-  const isCam = /^\d+$/.test(src);
+  src = String(src);
+  const isCam = isCameraSource(src);
   $("#srcType").value = isCam ? "camera" : "video";
   $("#src").value = src;
+  if (isCam) configuredCamera = src;
 }
 
 $("#startBtn").onclick = () => {
@@ -285,8 +289,9 @@ let curBatch = "";
 $("#recipeSel").onchange = () => post("/recipe",{batch:curBatch, recipe:$("#recipeSel").value}).then(refresh);
 function lane(n, l){ post("/sorter",{vial:n, lane:l}).then(refresh); }
 $("#srcType").onchange = () => {
-  $("#src").value = $("#srcType").value==="camera" ? "0" : "";
-  $("#src").placeholder = $("#srcType").value==="camera" ? "0 (camera number)" : "full path to the .mp4";
+  $("#src").value = $("#srcType").value==="camera" ? configuredCamera : "";
+  $("#src").placeholder = $("#srcType").value==="camera"
+    ? "camera number or /dev/v4l/by-id path" : "full path to the .mp4";
 };
 
 function decide(body){ post("/decide", body).then(refresh); }
@@ -306,6 +311,7 @@ function whyText(v){
 }
 
 function render(s){
+  if (s.camera_source) configuredCamera = s.camera_source;
   $("#ai").textContent = s.ai; $("#ai").className = "pill" + (s.ai_on ? " on" : "");
   $("#state").textContent = s.state; $("#src2").textContent = s.source ? "— " + s.source : "";
   $("#cur").textContent = s.running ? `Current batch ${s.current_batch}: ${s.in_batch} of ${s.batch_size} vials` : "";
