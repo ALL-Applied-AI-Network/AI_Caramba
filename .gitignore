@@ -3,3 +3,7 @@ dataset/
 recipe_dataset/
 *.pth
 __pycache__/
+
+# Melting Rainbow station output (raw camera video, logs) - keep out of git
+results/
+*.mp4
