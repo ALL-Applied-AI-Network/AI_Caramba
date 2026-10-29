@@ -107,23 +107,33 @@ Fill one vial. When it appears in the list on the right, click its picture to zo
 
 ## 7. Run batches
 
-| Batch | Recipe | Clear (T100) / Orange (T200) / Blue (T400) mL | Looks | Why |
-|---|---|---|---|---|
-| 1 | R12 | 10 / 50 / 10 = 70 | dark orange | start (no earlier batch → cause "unknown") |
-| 2 | R14 | 60 / – / 10 = 70 | pale blue | dark → pale: first vial should be tinted (high carryover risk) |
-| 3 | R11 | 10 / 10 / 50 = 70 | dark blue | pale → dark: checks we don't false-alarm (low risk) |
-| 4 (optional) | R12 | 10 / 50 / 10 = 70 | dark orange | blue → orange: should be caught again |
+**With a run plan (recommended):** a CSV with **one row per vial, in fill order** — the first columns are exactly what is typed into the line:
 
-Backups: R13 (– / 50 / 20), R9 (10 / 35 / 35). Keep fills ≥ 60 mL so the liquid covers the color window.
+| vial | clear_ml | yellow_ml | red_ml | blue_ml | total_ml | color | code | group | purpose |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 20 | 0 | 0 | 50 | 70 | Dark blue | DB | G1 | start |
 
-- Before each batch's first vial: pick the recipe in **Recipe on the line now**.
-- Every 3 vials = one batch (the batch's last vial is its clean reference). Different batch size → press **New batch now** at the recipe change.
-- When a batch finishes, each vial shows **PASS → good**, **PULL → scrap** (with likely cause and leftover %), or **REVIEW** (look, then click Pass / Reject). Then **Release batch** or **Hold batch**.
+Example: [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (27 vials, 10 recipes). Start with
+
+`./start_capture.sh --plan runs/2026-10-30_plan.csv`
+
+- Each vial is tagged with its planned recipe and mL; the page shows **"Next on the line: vial N of 27 — …"**.
+- **Groups:** vials with the same `group` are judged together and the group's **last vial is its clean reference** — so groups can be any size (not just 3). Without a `group` column, a new group starts whenever the mL change.
+- The line skipped a planned vial → press **▶**; it filled an extra vial → press **◀** (keeps the plan lined up with the real vials).
+- Mixed groups (e.g. known mixes judged against one clean vial) need the `group` column.
+
+**Without a plan:** every N vials (the "Vials / batch" box) is one group, the recipe is picked in the dropdown at each change, and **New batch now** ends a group early.
+
+**During the run (both ways):**
+
+- When a group finishes, each vial shows **PASS → good**, **PULL → scrap** (with likely cause and leftover %), or **REVIEW** (look, then click Pass / Reject). Then **Release batch** or **Hold batch**.
 - If the line's Teledyne color check shows a pass/fail, click under each vial what it said (**good / scrap**) — that is the baseline. If there is no Teledyne decision, skip those buttons.
 - On paper, per vial: number, recipe, time, tinted by eye (Y/N), anything odd.
 - Don't change settings mid-run.
 
 ## 8. Known-mix vials (optional)
+
+**Easiest: put them in the plan** (vials 25–27, the last group of [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv)): the line itself dispenses light yellow with exactly 10 % and 20 % dark blue, then a clean light yellow as the group's reference. Nothing to do by hand. **By hand instead:**
 
 For checking the "% leftover" estimate against the truth. Fill to ≥ 60 mL, stir well, place in the holder, wait 5 s, type a label, press **Measure vial in holder**:
 
@@ -133,6 +143,57 @@ For checking the "% leftover" estimate against the truth. Fill to ≥ 60 mL, sti
 
 Saved to `results/operator_output/snapshots.csv` + `snapshots/`.
 
+## 8b. Recording for the video (clips + screen recording)
+
+**Automatic, every camera run (Start → Stop):** two videos in `results/operator_output/`:
+
+| File | What | Size (30-min run) |
+|---|---|---|
+| `raw_camera_<time>.mp4` | every camera frame, no drawings — the data, can be re-run later | ~200 MB |
+| `run_annotated_<time>.mp4` | the camera view + measuring box + fill line + status bar with each batch result, ~12 frames/s — for editing the video | ~110 MB |
+
+Sizes measured on the organizers' 640×480 video (raw ≈ 6.7 MB/min, annotated ≈ 3.7 MB/min). A 30-vial / 10-recipe run took **28 min** in the organizers' video 5 (≈ 56 s per vial). Have ~1 GB free.
+
+
+**Clips from the station (works on any computer, nothing to install)** — buttons under the camera picture, separate from Start / Stop:
+
+| Button | What it saves |
+|---|---|
+| **● Record clip** → **■ Stop clip** | a video of the camera view with the yellow box, fill line, status and the latest batch result (e.g. "Batch B2: PULL vial 4, 5 to scrap – leftover from B1") |
+| **Save last 30 s** | the 30 seconds that just happened — press it right after a PULL appears, no need to have been recording |
+
+Saved to `results/operator_output/clips/` (`clip_<time>.mp4`, `last30s_<time>.mp4`, about 12 frames/s). The run keeps going; a clip still recording when you press Stop is saved.
+
+**Screen recording of the whole page** (for the "operator using the station" shot):
+
+- **CSI computer (Linux / Ubuntu):** press **Print Screen** → in the bar that opens, switch to the **video camera** icon → pick the screen or window → **Record**. Stop with the red button at the top right of the screen. Saved to `~/Videos/Screencasts/`. Older systems: **Ctrl + Alt + Shift + R** starts / stops (may stop on its own after 30 s).
+- **Windows:** **Win + Alt + R** starts / stops (Xbox Game Bar, saved to `Videos\Captures`), or Snipping Tool → **Record**.
+- Copy the screen recordings off the computer together with `results/operator_output` (step 9).
+
+## 8c. Copy the results to a USB stick automatically
+
+1. **Plug a USB stick into the CSI computer before starting.**
+2. Start as usual: `./start_capture.sh`. The terminal prints
+   `Results will be copied to the USB stick after every Stop: /media/<user>/<STICK>/melting_rainbow`
+   and the page shows "copies to USB after Stop".
+3. After **every Stop**, the station copies `results/operator_output` (videos, CSVs, clips, snapshots — only new or changed files) to `<STICK>/melting_rainbow/operator_output/`. The page shows "copied N file(s) …".
+4. Wait for that message before unplugging the stick (a 30-min run is ~300 MB; copying takes under a minute on most sticks).
+
+- No stick found → the terminal says so and everything stays in `results/operator_output` (plug the stick in and restart, or copy by hand).
+- Choose a different place: `COPY_TO=/path/to/folder ./start_capture.sh`. Turn it off: `COPY_TO=none ./start_capture.sh`.
+- Windows: add `--copy-to E:\melting_rainbow` to the start command (E: = the stick).
+- If a copy fails, the page says so — nothing is lost, the files are still in `results/operator_output`.
+
+## 8d. What gets recorded (metadata)
+
+| File | Contents |
+|---|---|
+| `operator_results.csv` | per vial: batch, recipe + mL (from the plan / dropdown), **start and end time (date + clock)**, status, rule ΔE, AI %, cause, leftover %, fill level, operator decision |
+| `run_log_<time>.csv` | **our run-log sheet, filled in automatically**: vial, group, recipe, mL, purpose, time, what the station said (+ ΔE, AI %, cause, leftover, fill). Only "Tinted by eye" and "Notes" are left to fill by hand — open it from the USB stick, or paste it into the Drive run-log sheet |
+| `operator_log.csv` | every event and click with time (start, recipe changes, batch results, Pass/Reject, Release/Hold, clips, copies) |
+| `session_<time>.json` | the whole run: start / stop time, camera settings (resolution, fps, exposure, white balance), alignment, plan, recipes per batch, "prev" recipe, counts, video file names, software version (git commit) |
+| `raw_camera_*.mp4`, `run_annotated_*.mp4`, `clips/`, `snapshots/` | videos and pictures (step 8b) |
+
 ## 9. Finish — don't skip
 
 1. Press **Stop**, wait until the page says **stopped** (this closes the raw video file properly). Only then close the terminal.
@@ -141,6 +202,9 @@ Saved to `results/operator_output/snapshots.csv` + `snapshots/`.
    - `operator_results.csv` — every vial: status, rule, ΔE, AI %, cause, leftover, fill level
    - `operator_log.csv` — every click and event with time
    - `camera_align.json`, `snapshots.csv`, `snapshots/` (if used)
+   - `clips/` — the clips from **Record clip** / **Save last 30 s**
+   - `run_annotated_*.mp4` — the whole run with the status bar (for the video)
+   - Already on the USB stick if one was plugged in at start (step 8c) — check the page says "copied …".
 3. Photo of the paper notes.
 4. Don't leave our results on the CSI computer if they ask you not to: delete `results/` after copying (ask staff first).
 

@@ -1,0 +1,28 @@
+vial,clear_ml,yellow_ml,red_ml,blue_ml,total_ml,color,code,group,purpose
+1,20,0,0,50,70,Dark blue,DB,G1,start
+2,20,0,0,50,70,Dark blue,DB,G1,
+3,20,0,0,50,70,Dark blue,DB,G1,clean reference (last of group)
+4,50,20,0,0,70,Light yellow,LY,G2,HIGH carryover risk: dark blue -> pale yellow
+5,50,20,0,0,70,Light yellow,LY,G2,
+6,50,20,0,0,70,Light yellow,LY,G2,clean reference (last of group)
+7,20,0,50,0,70,Red,RD,G3,low risk: pale -> dark
+8,20,0,50,0,70,Red,RD,G3,
+9,20,0,50,0,70,Red,RD,G3,clean reference (last of group)
+10,50,0,0,20,70,Light blue,LB,G4,HIGH carryover risk: red -> pale blue
+11,50,0,0,20,70,Light blue,LB,G4,
+12,50,0,0,20,70,Light blue,LB,G4,clean reference (last of group)
+13,10,30,0,30,70,Green,GR,G5,medium risk
+14,10,30,0,30,70,Green,GR,G5,
+15,10,30,0,30,70,Green,GR,G5,clean reference (last of group)
+16,70,0,0,0,70,Clear,CL,G6,HIGHEST risk: green -> clear
+17,70,0,0,0,70,Clear,CL,G6,
+18,70,0,0,0,70,Clear,CL,G6,clean reference (last of group)
+19,10,0,30,30,70,Purple,PU,G7,low risk: clear -> dark
+20,10,0,30,30,70,Purple,PU,G7,
+21,10,0,30,30,70,Purple,PU,G7,clean reference (last of group)
+22,45,15,10,0,70,Peach,PE,G8,HIGH carryover risk: purple -> pale
+23,45,15,10,0,70,Peach,PE,G8,
+24,45,15,10,0,70,Peach,PE,G8,clean reference (last of group)
+25,47,18,0,5,70,Light yellow + 10% dark blue (known mix),K10,G9,leftover check: exactly 10% dark blue
+26,44,16,0,10,70,Light yellow + 20% dark blue (known mix),K20,G9,leftover check: exactly 20% dark blue
+27,50,20,0,0,70,Light yellow,LY,G9,clean reference for the known mixes

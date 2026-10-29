@@ -92,3 +92,18 @@ Added Oct 28 (for the CSI session)
   Snapshot         "Measure vial in holder" with a label: measures whatever vial sits in the holder right now (known
                    mixes placed by hand - the fill detector only sees vials being filled). Label the clean one
                    "ref ..."; the next ones show dE against it. Saved to <output>\snapshots.csv + snapshots\*.png.
+
+Added Oct 28 (evening)
+  Record clip / Save last 30 s   buttons under the camera picture, separate from Start/Stop. A clip = the camera view
+                   with the measuring box, fill line and a status bar with the latest batch result, ~12 frames/s, saved
+                   to <output>/clips/. "Save last 30 s" writes the 30 s that just happened (kept in memory as JPEGs).
+  prev vial        a snapshot labeled "prev <name>" registers the recipe that ran before this session, so the first
+                   batch is checked for carryover and gets a cause (instead of "start of run").
+  Full-run video   every camera run also writes run_annotated_<time>.mp4 (camera view + status bar, ~12 fps) from Start
+                   to Stop, next to raw_camera_<time>.mp4. --no-record turns both off.
+  Run plan         --plan runs/<date>_plan.csv: one row per vial in fill order (vial, <tank>_ml..., color, code, group).
+                   Groups end where the plan's group changes (last vial = reference); "Next on the line" + < > to realign.
+  Metadata         per-vial start/end date+time in operator_results.csv; session_<time>.json per run (camera
+                   settings, alignment, plan, counts, software version).
+  Auto-copy        --copy-to DIR copies the output folder to DIR after every Stop (USB stick / synced folder);
+                   --after-stop "CMD" runs an upload command afterwards (e.g. rclone). Shown on the page; never deletes.

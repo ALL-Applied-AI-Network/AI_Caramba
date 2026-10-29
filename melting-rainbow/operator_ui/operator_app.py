@@ -179,6 +179,13 @@ class OperatorInspector(Inspector):
         self.batch_recipe = {}    # batch name -> recipe the operator entered (e.g. "R7"), optional
         self.sorter = {}          # vial index -> lane the existing Teledyne sorter used ("good"/"scrap"), baseline
         self.views = {}           # vial index -> full camera frame (jpeg) for the zoom view
+        self.plan = []            # run plan, one row per vial (what the line is told to make), in order
+        self.plan_offset = 0      # operator correction if a planned vial was skipped / an extra vial was filled
+
+    def planned(self, k):
+        """Plan row for detected vial index k (None past the end of the plan)."""
+        i = k + self.plan_offset
+        return self.plan[i] if 0 <= i < len(self.plan) else None
 
     def add_vial(self, frames, start_f, leave_f, fill_line=None):
         # name the vial's batch before the parent class files it
@@ -192,7 +199,8 @@ class OperatorInspector(Inspector):
         for img in frames:
             m = measure(img, ml); Ts.append(m["T"]); L.append(m["liquid_rgb"]); P.append(m["paper_rgb"])
         T, Lm, Pm = np.median(Ts, 0), np.median(L, 0), np.median(P, 0)
-        v = dict(n=k + 1, recipe=name, ml=ml, start_frame=start_f, leave_frame=leave_f, T=T,
+        plan_row = self.planned(k)
+        v = dict(n=k + 1, recipe=name, ml=ml, start_frame=start_f, leave_frame=leave_f, T=T, planned=plan_row,
                  OD=-np.log(np.clip(srgb_lin(Lm) / srgb_lin(Pm), 1e-4, None)), lab=lab_of_T(np.clip(T, 0, 1)),
                  frame=mid, t=time.strftime("%H:%M:%S"), fill_line=fill_line,
                  video_s=None)
@@ -214,7 +222,12 @@ class OperatorInspector(Inspector):
         self.views[k] = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes()
         self.in_batch += 1
         self.messages.append(f"vial {k + 1} measured ({name})")
-        if self.in_batch >= self.batch_size or self.force_break:
+        if plan_row is not None:                           # plan: the group ends where the next vial's group differs
+            nxt = self.planned(k + 1)
+            group_done = nxt is None or nxt["group"] != plan_row["group"]
+        else:
+            group_done = self.in_batch >= self.batch_size  # no plan (or past its end): every N vials
+        if group_done or self.force_break:
             self.end_batch()
 
     def end_batch(self):
@@ -272,12 +285,22 @@ class Engine:
         self.raw_path = ""
         self.snapshots = []                                     # manual measurements (known-mix vials etc.)
         self.prev_refs = []                                     # "prev ..." snapshots: recipe before this run
+        # video clips for the demo video, separate from Start/Stop: annotated camera view + status bar, ~12 fps
+        self.clip_req = None                                    # "start" / "stop" asked by the page
+        self.clip_on, self.clip_name, self.clip_t0, self.last_clip = False, "", 0.0, ""
+        self.replay_req = False                                 # "save the last 30 s" asked by the page
+        self.CLIP_FPS, self.REPLAY_S = 12, 30
+        self.run_video = ""                                     # annotated full-run video (camera runs)
+        self.plan, self.plan_recipes = self._load_plan(args.plan)   # run plan: one row per vial (+ mL per tank)
+        self.camera_settings, self.session_path, self.session = {}, "", {}
+        self.copy_status = ""                                   # auto-copy after Stop (--copy-to / --after-stop)
         self.paused = False
         self.is_file = False
         self.speed = args.speed
         self.clock_reset = False                                # set when speed changes / resume -> re-time playback
         self.video_t, self.video_len = 0.0, 0.0
         self.ins = OperatorInspector(args.batch_size, self.ai, args.tol)
+        self.ins.plan = self.plan                               # show the plan's first vial before Start
         self.out_dir = os.path.abspath(args.out)
         os.makedirs(self.out_dir, exist_ok=True)
         self.log_path = os.path.join(self.out_dir, "operator_log.csv")
@@ -299,6 +322,16 @@ class Engine:
             csv.writer(f).writerow([time.strftime("%Y-%m-%d %H:%M:%S"), event, batch, vial, detail])
 
     @staticmethod
+    def _software_version():
+        import subprocess, platform
+        try:
+            commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True,
+                                    text=True, timeout=5).stdout.strip()
+        except Exception:
+            commit = ""
+        return dict(git_commit=commit, python=platform.python_version(), opencv=cv2.__version__)
+
+    @staticmethod
     def _placeholder(text):
         img = np.full((480, 640, 3), 40, np.uint8)
         cv2.putText(img, text, (200, 240), 0, 0.9, (220, 220, 220), 2, cv2.LINE_AA)
@@ -313,6 +346,7 @@ class Engine:
         self.ins = OperatorInspector(batch_size, self.ai, self.args.tol)
         for name, od, lab in self.prev_refs:                     # keep the start-of-run reference across Stop/Start
             self.ins.add_previous_recipe(name, od, lab)
+        self.ins.plan = self.plan                                # planned recipe per vial (operator can adjust)
         self.running = True
         self.thread = threading.Thread(target=self._run, args=(source, speed), daemon=True)
         self.thread.start()
@@ -433,6 +467,128 @@ class Engine:
         self.log("snapshot", detail=f"{row['label']} Lab={row['lab']} dE_vs_ref={dE}")
         return f"saved snapshot {n}: {row['label']}" + (f" (dE {dE} vs '{row['ref']}')" if dE is not None else "")
 
+    @staticmethod
+    def _load_plan(path):
+        """Run plan CSV, ONE ROW PER VIAL in fill order - exactly what is typed into the line:
+             vial, clear_ml, yellow_ml, red_ml, blue_ml   (+ optional: color, code, group, purpose, total_ml)
+        Vials in a row with the same mL (or the same 'group') form one group; the group's LAST vial is its clean
+        reference. Returns (rows in order, {code: row})."""
+        if not path:
+            return [], {}
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            rows = [{k.strip(): (v or "").strip() for k, v in r.items() if k}
+                    for r in csv.DictReader(f) if (r.get("vial") or "").strip().isdigit()]
+        rows.sort(key=lambda r: int(r["vial"]))
+        tanks = [k for k in (rows[0] if rows else {}) if k.endswith("_ml") and k != "total_ml"]
+        g, last = 0, None
+        for r in rows:
+            mix = tuple(r.get(t, "") or "0" for t in tanks)
+            if not r.get("group"):                       # no group column: a new group whenever the mix changes
+                if mix != last:
+                    g += 1
+                r["group"] = f"G{g}"
+            last = mix
+            r["code"] = r.get("code") or r.get("color") or "/".join(mix)
+            r["tanks"] = {t[:-3]: r.get(t, "") for t in tanks}
+        recipes = {}
+        for r in rows:
+            recipes.setdefault(r["code"], r)
+        return rows, recipes
+
+    def recipe_info(self, code):
+        """'Light yellow (clear 50, yellow 20 mL)' for a recipe code from the plan, else just the code."""
+        r = self.plan_recipes.get(code)
+        if not r:
+            return code
+        ml = ", ".join(f"{t} {v}" for t, v in r["tanks"].items() if v not in ("", "0"))
+        return f"{r.get('color') or code}" + (f" ({ml} mL)" if ml else "")
+
+    def _batch_recipe_name(self, batch):
+        """Recipe of a station batch (e.g. 'B1' -> 'Dark blue'): operator entry, else the plan of its first vial."""
+        ins = self.ins
+        if not batch:
+            return ""
+        if ins.batch_recipe.get(batch):
+            return ins.batch_recipe[batch]
+        ks = sorted(k for k, b in ins.batch_of.items() if b == batch)
+        p = ins.vials[ks[0]].get("planned") if ks else None
+        return (p or {}).get("color", "")
+
+    def plan_shift(self, delta):
+        """Operator: the line skipped a planned vial (+1) or filled an extra one (-1) - realign the plan."""
+        with self.lock:
+            self.ins.plan_offset += int(delta)
+        self.log("plan_shift", detail=f"offset={self.ins.plan_offset}")
+        return f"plan shifted: next vial is planned vial {len(self.ins.vials) + 1 + self.ins.plan_offset}"
+
+    def _write_session(self, final=False):
+        """session_<time>.json: everything needed to understand / repeat this run (written at Start and at Stop)."""
+        if not self.session_path:
+            return
+        ins = self.ins
+        s = dict(self.session)
+        s.update(updated=time.strftime("%Y-%m-%d %H:%M:%S"), finished=final, state=self.state_text,
+                 camera_settings=self.camera_settings,
+                 alignment=None if self.align is None or not self.use_align else
+                 {k: v for k, v in self.align.items() if k != "M"},
+                 batch_size=ins.batch_size, plan_file=self.args.plan or "",
+                 plan=[{k: v for k, v in r.items() if k != "tanks"} for r in self.plan], plan_offset=ins.plan_offset,
+                 recipes_by_batch={b: dict(code=c, info=self.recipe_info(c)) for b, c in ins.batch_recipe.items()},
+                 previous_recipe=[p[0] for p in self.prev_refs], vials=len(ins.vials),
+                 pulled=sum(ins.final_status(k) == "REJECT" for k in range(len(ins.vials))),
+                 review=sum(ins.final_status(k) == "REVIEW" for k in range(len(ins.vials))),
+                 raw_video=os.path.basename(self.raw_path), run_video=os.path.basename(self.run_video),
+                 snapshots=len(self.snapshots))
+        with open(self.session_path, "w") as f:
+            json.dump(s, f, indent=1, default=str)
+
+    def request_clip(self, on):
+        if not self.running:
+            return "press Start first"
+        self.clip_req = "start" if on else "stop"
+        return "clip recording starting" if on else "clip saved"
+
+    def request_replay(self):
+        if not self.running:
+            return "press Start first"
+        self.replay_req = True
+        return f"saving the last {self.REPLAY_S} s"
+
+    def _banner(self):
+        """One line for the clip's status bar: what the station is doing + the latest batch result."""
+        ins = self.ins
+        done = [idx for idx in ins.batches if idx[0] in ins.results]
+        if not done:
+            return self.state_text, "", (200, 200, 200)
+        idx = done[-1]
+        b = ins.vials[idx[0]]["recipe"]
+        st = {k: ins.final_status(k) for k in idx}
+        pull = [ins.vials[k]["n"] for k in idx if st[k] == "REJECT"]
+        rev = [ins.vials[k]["n"] for k in idx if st[k] == "REVIEW"]
+        if pull:
+            k = next(k for k in idx if st[k] == "REJECT")
+            r = ins.results[k]
+            why = (f" - leftover from {r['cause']}" if r.get("cause") and not str(r["cause"]).startswith("start")
+                   else "")
+            return self.state_text, f"Batch {b}: PULL vial {', '.join(map(str, pull))} to scrap{why}", (60, 60, 230)
+        if rev:
+            return self.state_text, f"Batch {b}: vial {', '.join(map(str, rev))} to operator REVIEW", (0, 170, 240)
+        return self.state_text, f"Batch {b}: all vials PASS", (80, 200, 80)
+
+    def _clip_frame(self, view):
+        state, result, color = self._banner()
+        bar = np.full((64, view.shape[1], 3), 24, np.uint8)
+        cv2.putText(bar, state[:70], (10, 24), 0, 0.55, (230, 230, 230), 1, cv2.LINE_AA)
+        if result:
+            cv2.circle(bar, (18, 47), 7, color, -1)
+            cv2.putText(bar, result[:70], (32, 53), 0, 0.6, color, 2, cv2.LINE_AA)
+        return np.vstack([view, bar])
+
+    def _clips_dir(self):
+        d = os.path.join(self.out_dir, "clips")
+        os.makedirs(d, exist_ok=True)
+        return d
+
     def set_speed(self, speed):
         self.speed = max(0.25, min(float(speed), 200.0))
         self.clock_reset = True
@@ -491,6 +647,7 @@ class Engine:
         try:
             if hardware_camera:
                 cap, camera_index, settings = open_linewatch_camera(source)
+                self.camera_settings = settings
                 self.source_text = f"camera {source} (/dev/video{camera_index})"
                 self.log("camera_ready", detail=f"source={source} resolved=/dev/video{camera_index} settings={settings}")
             else:
@@ -521,11 +678,22 @@ class Engine:
         on, off_min, min_fill_s = 20.0, 8.0, 5.0         # same as demo/live_inspect.py
         det = LevelFillDetector(fps) if self.args.detector == "level" else None
         t_base, f_base, last_jpeg = time.time(), 0, 0.0
+        stamp0 = time.strftime('%Y%m%d_%H%M%S')
+        self.session_path = os.path.join(self.out_dir, f"session_{stamp0}.json")
+        self.session = dict(started=time.strftime("%Y-%m-%d %H:%M:%S"), source=str(source), source_text=self.source_text,
+                            fps=fps, live=not is_file, ai=self.ai.msg, detector=self.args.detector, tol=self.args.tol,
+                            software=self._software_version())
+        self._write_session()
         writer = None                                     # raw recording (camera runs): every frame as it came in
+        import collections as _c
+        clip_writer, replay = None, _c.deque(maxlen=self.CLIP_FPS * self.REPLAY_S)   # replay = jpeg bytes
         if not is_file and not self.args.no_record:
-            self.raw_path = os.path.join(self.out_dir, f"raw_camera_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
+            stamp = time.strftime('%Y%m%d_%H%M%S')
+            self.raw_path = os.path.join(self.out_dir, f"raw_camera_{stamp}.mp4")
+            self.run_video = os.path.join(self.out_dir, f"run_annotated_{stamp}.mp4")   # Start -> Stop, with status bar
         else:
-            self.raw_path = ""
+            self.raw_path, self.run_video = "", ""
+        run_writer = None
         self.state_text = "waiting for a vial"
 
         def vial_done(s0, leave_f, line):
@@ -533,6 +701,10 @@ class Engine:
                 closed_before = len(self.ins.results)
                 self.ins.add_vial(steady_frames(buf, leave_f, fps), s0, leave_f, line)
                 self.ins.vials[-1]["video_s"] = round(leave_f / fps, 1) if is_file else None
+                now_w = time.time()                       # wall clock: match vials to CSI logs / videos
+                self.ins.vials[-1]["leave_time"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_w))
+                self.ins.vials[-1]["start_time"] = time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(now_w - max(0, leave_f - s0) / fps))
                 if len(self.ins.results) > closed_before:
                     b = f"B{self.ins.batch_no - 1}"
                     self.log("batch_done", b, "", self._batch_summary(b))
@@ -593,6 +765,36 @@ class Engine:
                     cv2.line(view, (288, det.level), (337, det.level), (255, 120, 0), 2)
                 self.jpeg = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes()
                 last_jpeg = now
+                cf = self._clip_frame(view)                   # demo-video clips: camera view + status bar
+                if self.run_video:                            # whole run, automatically, for the video edit
+                    if run_writer is None:
+                        run_writer = cv2.VideoWriter(self.run_video, cv2.VideoWriter_fourcc(*"mp4v"), self.CLIP_FPS,
+                                                     (cf.shape[1], cf.shape[0]))
+                        self.log("run_video", detail=self.run_video)
+                    run_writer.write(cf)
+                replay.append(cv2.imencode(".jpg", cf, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes())
+                if self.clip_req == "start" and clip_writer is None:
+                    self.clip_name = f"clip_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+                    clip_writer = cv2.VideoWriter(os.path.join(self._clips_dir(), self.clip_name),
+                                                  cv2.VideoWriter_fourcc(*"mp4v"), self.CLIP_FPS,
+                                                  (cf.shape[1], cf.shape[0]))
+                    self.clip_on, self.clip_t0, self.clip_req = True, time.time(), None
+                    self.log("clip_start", detail=self.clip_name)
+                if clip_writer is not None:
+                    clip_writer.write(cf)
+                if self.clip_req == "stop" and clip_writer is not None:
+                    clip_writer.release(); clip_writer = None
+                    self.clip_on, self.clip_req, self.last_clip = False, None, self.clip_name
+                    self.log("clip_saved", detail=self.clip_name)
+                if self.replay_req:
+                    name = f"last{self.REPLAY_S}s_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
+                    w = cv2.VideoWriter(os.path.join(self._clips_dir(), name), cv2.VideoWriter_fourcc(*"mp4v"),
+                                        self.CLIP_FPS, (cf.shape[1], cf.shape[0]))
+                    for j in list(replay):
+                        w.write(cv2.imdecode(np.frombuffer(j, np.uint8), cv2.IMREAD_COLOR))
+                    w.release()
+                    self.replay_req, self.last_clip = False, name
+                    self.log("replay_saved", detail=f"{name} ({len(replay) / self.CLIP_FPS:.0f} s)")
             fidx += 1
             if is_file:                                   # play recordings at speed x real time
                 target = t_base + (fidx - f_base) / (fps * max(self.speed, 0.1))
@@ -609,12 +811,63 @@ class Engine:
                 self.log("batch_done", b, "", self._batch_summary(b))
         if writer is not None:
             writer.release()
+        if run_writer is not None:
+            run_writer.release()
+        if clip_writer is not None:                       # run ended while a clip was recording: keep it
+            clip_writer.release()
+            self.last_clip = self.clip_name
+            self.log("clip_saved", detail=self.clip_name)
+        self.clip_on, self.clip_req, self.replay_req = False, None, False
         cap.release()
         self.state_text = "finished" if self.running else "stopped"
         self.running = False
         self.paused = False
         self.log("stop", detail=f"{len(self.ins.vials)} vials")
         self._write_results()
+        self.session["stopped"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        self._write_session(final=True)
+        if self.args.copy_to or self.args.after_stop:
+            threading.Thread(target=self._copy_out, daemon=True).start()
+
+    def _copy_out(self):
+        """After Stop: copy everything in the output folder to --copy-to (USB stick / synced folder), then run
+        --after-stop (e.g. an upload command). Only new or changed files are copied."""
+        import shutil, subprocess
+        try:
+            if self.args.copy_to:
+                dest = os.path.join(os.path.abspath(self.args.copy_to), os.path.basename(self.out_dir))
+                self.copy_status = f"copying to {dest} ..."
+                n = 0
+                for root, _, files in os.walk(self.out_dir):
+                    for f in files:
+                        src = os.path.join(root, f)
+                        dst = os.path.join(dest, os.path.relpath(src, self.out_dir))
+                        if (not os.path.exists(dst) or os.path.getsize(dst) != os.path.getsize(src)
+                                or os.path.getmtime(dst) < os.path.getmtime(src)):
+                            os.makedirs(os.path.dirname(dst), exist_ok=True)
+                            shutil.copy2(src, dst)
+                            n += 1
+                import glob
+                for pattern in self.args.copy_extra or []:              # e.g. the line program's own log files
+                    for src in glob.glob(os.path.expanduser(pattern)):
+                        if os.path.isfile(src):
+                            dst = os.path.join(dest, "extra", os.path.basename(src))
+                            os.makedirs(os.path.dirname(dst), exist_ok=True)
+                            shutil.copy2(src, dst)
+                            n += 1
+                self.copy_status = f"copied {n} new/changed file(s) to {dest}"
+                self.log("copied", detail=self.copy_status)
+            if self.args.after_stop:
+                self.copy_status += ("; " if self.copy_status else "") + "running upload command ..."
+                r = subprocess.run(self.args.after_stop, shell=True, capture_output=True, text=True, timeout=3600)
+                ok = "upload done" if r.returncode == 0 else f"upload FAILED (code {r.returncode}): {r.stderr.strip()[-200:]}"
+                self.copy_status = self.copy_status.replace("running upload command ...", ok)
+                self.log("after_stop", detail=f"code={r.returncode} {r.stderr.strip()[-300:]}")
+            if self.args.copy_to:                         # refresh the log copy so it includes the lines above
+                shutil.copy2(self.log_path, os.path.join(dest, os.path.basename(self.log_path)))
+        except Exception as e:                            # never lose the run because a copy failed
+            self.copy_status = f"COPY FAILED: {e} - the files are still in {self.out_dir}"
+            self.log("copy_error", detail=str(e))
 
     def _batch_summary(self, b):
         ks = [k for k, n in self.ins.batch_of.items() if n == b]
@@ -626,6 +879,33 @@ class Engine:
         if rows:
             with open(os.path.join(self.out_dir, "operator_results.csv"), "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
+            self._write_run_log(rows)
+
+    def _write_run_log(self, rows):
+        """run_log_<time>.csv in the same layout as the team's run-log sheet, filled in automatically.
+        Only 'Tinted by eye' and 'Notes' are left for a person."""
+        label = {"REJECT": "PULL", "PASS": "PASS", "REVIEW": "REVIEW", "REFERENCE": "REFERENCE"}
+        stamp = os.path.basename(self.session_path)[8:-5] if self.session_path else time.strftime("%Y%m%d_%H%M%S")
+        with open(os.path.join(self.out_dir, f"run_log_{stamp}.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["Vial #", "Group", "Recipe", "Clear mL", "Yellow mL", "Red mL", "Blue mL", "Total mL", "Purpose",
+                        "Time filled", "Tinted by eye? (Y/N)", "Station said", "Notes", "Planned vial", "Batch (station)",
+                        "dE vs reference", "AI % off", "Cause", "Leftover %", "Fill", "Operator decision"])
+            for r in rows:
+                k = int(r["vial"]) - 1
+                p = self.ins.vials[k]["planned"] if k < len(self.ins.vials) else None
+                t = (p or {}).get("tanks", {})
+                said = label.get(r["status"], r["status"])
+                if r.get("cause") and r["status"] == "REJECT":
+                    said += f" (leftover from {r['cause']}" + (f" - {r['cause_recipe']})" if r.get("cause_recipe") else ")")
+                w.writerow([r["vial"], (p or {}).get("group", ""), (p or {}).get("color", "") or r.get("recipe", ""),
+                            t.get("clear", ""), t.get("yellow", ""), t.get("red", ""), t.get("blue", ""),
+                            (p or {}).get("total_ml", ""), (p or {}).get("purpose", ""),
+                            (r.get("start_time") or r.get("time") or "")[-8:], "", said, "",
+                            r.get("planned_vial", ""), r["batch"], r.get("dE", ""),
+                            "" if r.get("ai_p_off") is None else round(100 * r["ai_p_off"]),
+                            r.get("cause") or "", "" if r.get("leftover_pct") is None else r["leftover_pct"],
+                            r.get("fill", ""), r.get("operator", "")])
 
     # ---- state for the page
     def snapshot(self):
@@ -646,14 +926,23 @@ class Engine:
                     cause_2nd=r.get("cause_2nd"),
                     leftover_pct=None if r.get("leftover") is None else round(100 * r["leftover"]),
                     operator=ins.decisions.get(k, ""), sorter=ins.sorter.get(k, ""),
-                    recipe=ins.batch_recipe.get(v["recipe"], ""),
-                    cause_recipe=ins.batch_recipe.get(r.get("cause") or "", "")))
+                    recipe=(ins.batch_recipe.get(v["recipe"]) or (v["planned"] or {}).get("code", "")),
+                    recipe_info=(self.recipe_info(ins.batch_recipe[v["recipe"]]) if ins.batch_recipe.get(v["recipe"])
+                                 else self.recipe_info((v["planned"] or {}).get("code", ""))),
+                    planned_vial=(v["planned"] or {}).get("vial", ""),
+                    start_time=v.get("start_time", ""), leave_time=v.get("leave_time", ""),
+                    cause_recipe=self._batch_recipe_name(r.get("cause") or "")))
             batches = []
             for idx in ins.batches:
                 b = ins.vials[idx[0]]["recipe"]
                 st = [ins.final_status(k) for k in idx]
                 done = idx[0] in ins.results
-                batches.append(dict(batch=b, recipe=ins.batch_recipe.get(b, ""), vials=[ins.vials[k]["n"] for k in idx], done=done,
+                codes = list(dict.fromkeys((ins.vials[k]["planned"] or {}).get("code", "") for k in idx))
+                bcode = ins.batch_recipe.get(b) or " + ".join(c for c in codes if c)
+                batches.append(dict(batch=b, recipe=bcode,
+                                    recipe_info=(self.recipe_info(bcode) if len(codes) == 1 or ins.batch_recipe.get(b)
+                                                 else bcode),
+                                    vials=[ins.vials[k]["n"] for k in idx], done=done,
                                     n_reject=st.count("REJECT"), n_review=st.count("REVIEW"),
                                     decision=ins.decisions.get(b, "")))
             judged = [v for v in vials if v["status"] in ("PASS", "REJECT", "REVIEW")]
@@ -670,9 +959,18 @@ class Engine:
                         align=None if self.align is None else {**{k: v for k, v in self.align.items() if k != "M"},
                                                                "applied": self.use_align},
                         raw_path=os.path.basename(self.raw_path) if self.raw_path else "",
+                        clip_on=self.clip_on, clip_name=self.clip_name, copy_status=self.copy_status,
+                        copy_to=self.args.copy_to or "",
+                        run_video=os.path.basename(self.run_video) if self.run_video and self.running else "",
+                        clip_s=round(time.time() - self.clip_t0) if self.clip_on else 0, last_clip=self.last_clip,
                         snapshots=self.snapshots[-12:],
                         ai_on=self.ai.ok, batch_size=ins.batch_size, current_batch=f"B{ins.batch_no}",
                         current_recipe=ins.batch_recipe.get(f"B{ins.batch_no}", ""),
+                        plan_recipes=[dict(code=c, info=self.recipe_info(c)) for c in self.plan_recipes],
+                        next_planned=(lambda r: None if r is None else dict(vial=r["vial"], info=self.recipe_info(r["code"]),
+                                      purpose=r.get("purpose", "")))(ins.planned(len(ins.vials))),
+                        plan_len=len(self.plan), plan_offset=ins.plan_offset,
+                        plan_file=os.path.basename(self.args.plan) if self.args.plan else "",
                         in_batch=ins.in_batch, vials=vials, batches=batches, log=os.path.basename(self.log_path),
                         messages=list(ins.messages))
 
@@ -747,6 +1045,12 @@ def make_handler(engine):
                 msg = engine.set_align(d.get("points"), bool(d.get("off")))
             elif self.path == "/snapshot":
                 msg = engine.take_snapshot(str(d.get("label", "")).strip()[:60])
+            elif self.path == "/planshift":
+                msg = engine.plan_shift(d.get("delta", 0))
+            elif self.path == "/clip":
+                msg = engine.request_clip(bool(d.get("on")))
+            elif self.path == "/replay":
+                msg = engine.request_replay()
             elif self.path == "/speed":
                 msg = engine.set_speed(d.get("speed") or 1)
             elif self.path == "/newbatch":
@@ -775,7 +1079,13 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--autostart", action="store_true", help="start right away (video if given, else camera)")
     ap.add_argument("--no-browser", action="store_true")
-    ap.add_argument("--no-record", action="store_true", help="don't save the raw camera video (saved by default)")
+    ap.add_argument("--no-record", action="store_true",
+                    help="don't save the camera videos (raw + annotated full-run video are saved by default)")
+    ap.add_argument("--copy-to", help="after every Stop, copy the output folder here (e.g. a USB stick or synced folder)")
+    ap.add_argument("--after-stop", help="shell command to run after every Stop (e.g. an rclone upload)")
+    ap.add_argument("--plan", help="run plan CSV: batch,recipe,name,<tank>_ml... - tags each batch with its recipe")
+    ap.add_argument("--copy-extra", action="append",
+                    help="file or pattern to copy to <copy-to>/extra after every Stop (e.g. the line program's log)")
     ap.add_argument("--detector", choices=["level", "color"], default="level",
                     help="level (default): change from the empty vial, finds clear/pale fills and reads the fill line; "
                          "color: the older darker/colorful-bottom score")

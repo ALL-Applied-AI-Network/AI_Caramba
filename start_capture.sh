@@ -24,6 +24,27 @@ if [[ ! -e "${CAMERA_DEVICE}" ]]; then
     exit 1
 fi
 
+# USB stick: after every Stop the station copies results/operator_output to <stick>/melting_rainbow/.
+# Picks the first writable stick under /media/$USER (Ubuntu) or /run/media/$USER. Override with COPY_TO=/some/dir,
+# or COPY_TO=none to turn it off.
+USER_NAME="${USER:-$(id -un)}"
+COPY_TO="${COPY_TO:-}"
+if [[ -z "${COPY_TO}" ]]; then
+    for mount in /media/"${USER_NAME}"/* /run/media/"${USER_NAME}"/*; do
+        if [[ -d "${mount}" && -w "${mount}" ]]; then
+            COPY_TO="${mount}/melting_rainbow"
+            break
+        fi
+    done
+fi
+COPY_ARGS=()
+if [[ -n "${COPY_TO}" && "${COPY_TO}" != "none" ]]; then
+    echo "Results will be copied to the USB stick after every Stop: ${COPY_TO}"
+    COPY_ARGS=(--copy-to "${COPY_TO}")
+else
+    echo "No USB stick found - results stay in ${OUTPUT_DIR} (plug a stick in and restart to copy automatically)."
+fi
+
 cd "${SCRIPT_DIR}"
 exec "${APP_PYTHON}" "${OPERATOR_APP}" \
     --camera "${CAMERA_DEVICE}" \
@@ -31,4 +52,5 @@ exec "${APP_PYTHON}" "${OPERATOR_APP}" \
     --ai-model "${AI_MODEL}" \
     --out "${OUTPUT_DIR}" \
     --autostart \
+    ${COPY_ARGS[@]+"${COPY_ARGS[@]}"} \
     "$@"

@@ -92,6 +92,7 @@ footer a{color:var(--accent)}
 #prog{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--muted)}
 #prog .bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
 #prog .bar i{display:block;height:100%;width:0;background:var(--accent)}
+button.rec{background:var(--reject);color:#fff;border-color:var(--reject)}
 button.paused{background:var(--review-bg);color:var(--review);border-color:var(--review)}
 /* zoom viewer */
 #zoom{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:10;padding:16px}
@@ -164,12 +165,23 @@ button.paused{background:var(--review-bg);color:var(--review);border-color:var(-
     <img src="/stream" alt="Live fill camera with the measuring box drawn in yellow">
     <div id="statebar">
       <div><span id="state">stopped</span> <span class="why" id="src2"></span></div>
-      <button class="big" id="newBatch" title="Press at a recipe change to end the current batch early">New batch now</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="clipBtn" title="Record a video clip of this view (separate from Start/Stop)">● Record clip</button>
+        <button id="replayBtn" title="Save the last 30 seconds as a clip - for when something happens before you hit record">Save last 30 s</button>
+        <button class="big" id="newBatch" title="Press at a recipe change to end the current batch early">New batch now</button>
+      </div>
     </div>
     <div id="prog" hidden><span id="ptime"></span><span class="bar"><i id="pbar"></i></span></div>
+    <div class="why" id="clipMsg" style="margin-top:6px"></div>
     <div class="why" id="cur" style="margin-top:6px"></div>
+    <div class="recipebar" id="planbar" hidden>
+      <label>Next on the line</label>
+      <span id="nextPlan" class="why" style="flex:1"></span>
+      <button id="planBack" title="The line filled an extra vial that isn't in the plan">◀</button>
+      <button id="planFwd" title="The line skipped a planned vial">▶</button>
+    </div>
     <div class="recipebar">
-      <label for="recipeSel">Recipe on the line now</label>
+      <label for="recipeSel">Recipe for this group (change only if different from the plan)</label>
       <select id="recipeSel">
         <option value="">— not entered —</option>
         <option>R5</option><option>R6</option><option>R7</option><option>R8</option><option>R9</option>
@@ -281,12 +293,16 @@ $("#startBtn").onclick = () => {
   post("/start",{source:src,batch_size:$("#bs").value,speed:$("#sp").value}).then(refresh);
 };
 $("#stopBtn").onclick = () => post("/stop").then(refresh);
+$("#planBack").onclick = () => post("/planshift",{delta:-1}).then(r => { $("#clipMsg").textContent = r.msg; refresh(); });
+$("#planFwd").onclick = () => post("/planshift",{delta:1}).then(r => { $("#clipMsg").textContent = r.msg; refresh(); });
+$("#clipBtn").onclick = () => post("/clip",{on: !(lastState && lastState.clip_on)}).then(r => { $("#clipMsg").textContent = r.msg; refresh(); });
+$("#replayBtn").onclick = () => post("/replay").then(r => { $("#clipMsg").textContent = r.msg; refresh(); });
 let paused = false;
 $("#pauseBtn").onclick = () => post("/pause",{on:!paused}).then(refresh);
 $("#sp").onchange = () => { if (lastState && lastState.running) post("/speed",{speed:$("#sp").value}).then(refresh); };
 function fmt(t){ t=Math.max(0,Math.round(t)); return Math.floor(t/60)+":"+String(t%60).padStart(2,"0"); }
 $("#newBatch").onclick = () => post("/newbatch").then(refresh);
-let curBatch = "";
+let curBatch = "", planLoaded = false;
 $("#recipeSel").onchange = () => post("/recipe",{batch:curBatch, recipe:$("#recipeSel").value}).then(refresh);
 function lane(n, l){ post("/sorter",{vial:n, lane:l}).then(refresh); }
 $("#srcType").onchange = () => {
@@ -318,11 +334,17 @@ function render(s){
   $("#cur").textContent = s.running ? `Current batch ${s.current_batch}: ${s.in_batch} of ${s.batch_size} vials` : "";
   $("#startBtn").disabled = s.running; $("#stopBtn").disabled = !s.running;
   lastState = s; paused = s.paused;
+  const cb = $("#clipBtn"); cb.disabled = !s.running; $("#replayBtn").disabled = !s.running;
+  cb.textContent = s.clip_on ? `■ Stop clip (${fmt(s.clip_s)})` : "● Record clip";
+  cb.className = s.clip_on ? "rec" : "";
+  if (s.last_clip && !s.clip_on) $("#clipMsg").textContent = `Last clip saved: clips/${s.last_clip}`;
   const ap = $("#alignPill");
   ap.textContent = !s.align ? "alignment off" : s.align.applied
     ? `aligned ×${s.align.scale} ${s.align.angle_deg}° (${s.align.time.slice(11,16)})` : "alignment saved (not used for this video)";
   ap.className = "pill" + (s.align && s.align.applied ? " on" : "");
-  $("#src2").textContent = (s.source ? "— " + s.source : "") + (s.raw_path && s.running ? " · recording raw video → " + s.raw_path : "");
+  $("#src2").textContent = (s.source ? "— " + s.source : "") + (s.raw_path && s.running ? " · recording raw video → " + s.raw_path : "")
+    + (s.run_video ? " + " + s.run_video : "") + (s.copy_to ? " · copies to USB after Stop" : "");
+  if (s.copy_status) $("#clipMsg").textContent = s.copy_status;
   renderSnaps(s);
   const pb = $("#pauseBtn");
   pb.disabled = !s.running || !s.is_file;
@@ -336,6 +358,15 @@ function render(s){
     $("#pbar").style.width = Math.min(100, 100*s.video_t/s.video_len) + "%"; }
   curBatch = s.current_batch;
   if (!srcFilled && s.last_source){ showSource(s.last_source); srcFilled = true; }
+  $("#planbar").hidden = !s.plan_len;
+  if (s.plan_len) $("#nextPlan").innerHTML = s.next_planned
+      ? `<b>vial ${s.next_planned.vial} of ${s.plan_len}</b> — ${s.next_planned.info}${s.next_planned.purpose ? " · " + s.next_planned.purpose : ""}`
+      : "end of the plan (extra vials are grouped every " + s.batch_size + ")";
+  if (s.plan_recipes && s.plan_recipes.length && !planLoaded){        // run plan: dropdown = our recipes
+    $("#recipeSel").innerHTML = '<option value="">— not entered —</option>' +
+      s.plan_recipes.map(r => `<option value="${r.code}">${r.code} — ${r.info}</option>`).join("");
+    planLoaded = true;
+  }
   if (document.activeElement !== $("#recipeSel")) $("#recipeSel").value = s.current_recipe || "";
   const t = s.tally;
   $("#tally").innerHTML = s.vials.length ?
@@ -374,9 +405,9 @@ function render(s){
         <button class="${v.sorter==='scrap'?'sel':''}" onclick="lane(${n},'${v.sorter==='scrap'?'':'scrap'}')">scrap</button></div>`;
       return `<div class="vrow"><img src="/thumb/${n}.jpg?${b.done?1:0}" alt="vial ${n} - click to zoom" onclick="openZoom(${n})">
         <span class="vnum">${n}</span><span class="chip ${v.status}">${label}${v.operator?" ✎":""}</span>
-        <span class="why">${whyText(v)}<br>${v.time}${v.video_s!=null?" (video "+fmt(v.video_s)+")":""} · ${v.fill}${laneHtml}</span>${over}</div>`;
+        <span class="why">${whyText(v)}<br>${v.recipe_info ? "<b>" + v.recipe_info + "</b> · " : ""}${v.time}${v.video_s!=null?" (video "+fmt(v.video_s)+")":""} · ${v.fill}${laneHtml}</span>${over}</div>`;
     }).join("");
-    return `<div class="batch card" style="padding:0"><div class="bhead"><h3>Batch ${b.batch}${b.recipe?" · "+b.recipe:""}</h3>
+    return `<div class="batch card" style="padding:0"><div class="bhead"><h3>Batch ${b.batch}${b.recipe?" · "+b.recipe_info:""}</h3>
       <span class="sum">${sum}</span><div class="acts">${acts}</div></div>${rows}</div>`;
   }).join("");
   $("#batches").innerHTML = html;
