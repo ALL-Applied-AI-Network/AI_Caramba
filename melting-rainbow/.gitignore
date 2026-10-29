@@ -1,7 +1,0 @@
-mock_data/
-csi-vial-fill-dataset/
-variants/
-*.csv
-!labels/*.csv
-*.jpg
-__pycache__/

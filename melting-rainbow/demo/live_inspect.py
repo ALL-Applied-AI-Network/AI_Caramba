@@ -134,6 +134,16 @@ class Inspector:
         last = self.vials[-2] if len(self.vials) > 1 else None
         return last is not None and np.linalg.norm(v["lab"] - last["lab"]) > 25
 
+    def add_previous_recipe(self, name, OD, lab):
+        """Start of a run: a clean vial of the recipe that ran BEFORE this session (measured by hand) becomes the
+        earliest 'earlier batch', so the first batch can be checked for carryover and named like any other."""
+        key = f"{name} (prev)"
+        self.refs[key] = dict(OD=np.asarray(OD, float), lab=np.asarray(lab, float))
+        if key in self.order:
+            self.order.remove(key)
+        self.order.insert(0, key)                         # oldest: batches measured in this run stay more recent
+        self.messages.append(f"previous recipe registered: {name}")
+
     def finish_batch(self):
         if not self.batches or self.batches[-1][0] in self.results:
             return
@@ -168,7 +178,7 @@ class Inspector:
                     res["cause_sure"] = ratio < CAUSE_SURE_RATIO
                     res["cause_2nd"] = name(second) if second is not None else None
             elif res["verdict"] == "OFF-COLOR":
-                res["cause"] = "unknown (no earlier batch seen)"
+                res["cause"] = "start of run (no earlier batch to compare)"
             n_off += res["verdict"] == "OFF-COLOR"
             self.results[k] = res
         self.messages.append(f"batch {self._name(key)} released: {len(idx)} vials, {n_off} off-color")

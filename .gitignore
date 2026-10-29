@@ -5,5 +5,10 @@ recipe_dataset/
 __pycache__/
 
 # Melting Rainbow station output (raw camera video, logs) - keep out of git
-results/
+/results/
 *.mp4
+csi-vial-fill-dataset/
+mock_data/
+variants/
+twin_dataset*/
+*.zip

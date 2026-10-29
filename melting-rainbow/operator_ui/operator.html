@@ -182,7 +182,8 @@ button.paused{background:var(--review-bg);color:var(--review);border-color:var(-
       <input id="snapLabel" placeholder='e.g. "ref clean R7" or "R7 + 10 mL R12"'>
       <button id="snapBtn" title="Measure the vial that is in the holder right now">Measure vial in holder</button>
     </div>
-    <div class="why">For vials placed by hand (known mixes). Label the clean one starting with "ref" — later ones show ΔE against it.
+    <div class="why"><b>Start of a run:</b> measure one clean vial of the recipe that ran before, labeled "prev R12" (any name) — the first batch is then checked for carryover like every other.
+      <b>Known mixes:</b> label the clean one starting with "ref" — later ones show ΔE against it.
       Saved to snapshots.csv with a picture.</div>
     <table id="snapTable" hidden><thead><tr><th>#</th><th>time</th><th>label</th><th>L* a* b*</th><th>ΔE vs ref</th></tr></thead><tbody></tbody></table>
     <div class="why" id="snapMsg"></div>
@@ -305,7 +306,7 @@ function whyText(v){
     : `<b>The reference vial's fill is below the color window</b> — no clean color to compare with. Check by eye.`;
   parts.push(`Rule: <b>${v.rule==="OFF-COLOR"?"off":"ok"}</b> (ΔE ${v.dE})`);
   if (v.ai_p_off!==null && v.ai_p_off!==undefined) parts.push(`AI: <b>${Math.round(v.ai_p_off*100)}% off</b>`);
-  if (v.cause && v.rule==="OFF-COLOR") parts.push(`Cause: <b>${v.cause.startsWith("unknown")?"unknown (first batch)":"leftover from "+v.cause+(v.cause_recipe?" ("+v.cause_recipe+")":"")+(v.cause_sure===false?" (unsure, maybe "+v.cause_2nd+")":"")}</b>`);
+  if (v.cause && v.rule==="OFF-COLOR") parts.push(`Cause: <b>${v.cause.startsWith("start of run")?"start of run (tip: measure a 'prev' vial at start)":"leftover from "+v.cause+(v.cause_recipe?" ("+v.cause_recipe+")":"")+(v.cause_sure===false?" (unsure, maybe "+v.cause_2nd+")":"")}</b>`);
   if (v.leftover_pct!==null && v.rule==="OFF-COLOR") parts.push(`Leftover ≈ <b>${v.leftover_pct}%</b>`);
   return parts.join(" · ");
 }

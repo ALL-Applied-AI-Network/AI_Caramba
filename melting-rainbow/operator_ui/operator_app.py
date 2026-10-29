@@ -271,6 +271,7 @@ class Engine:
         self.use_align = True                                   # False for organizers' videos (already their camera)
         self.raw_path = ""
         self.snapshots = []                                     # manual measurements (known-mix vials etc.)
+        self.prev_refs = []                                     # "prev ..." snapshots: recipe before this run
         self.paused = False
         self.is_file = False
         self.speed = args.speed
@@ -310,6 +311,8 @@ class Engine:
         self.last_source = str(source)
         self.paused, self.speed = False, speed
         self.ins = OperatorInspector(batch_size, self.ai, self.args.tol)
+        for name, od, lab in self.prev_refs:                     # keep the start-of-run reference across Stop/Start
+            self.ins.add_previous_recipe(name, od, lab)
         self.running = True
         self.thread = threading.Thread(target=self._run, args=(source, speed), daemon=True)
         self.thread.start()
@@ -410,6 +413,14 @@ class Engine:
                    lab=[round(float(x), 2) for x in lab], dE_vs_ref=dE, ref=ref["label"] if ref else "",
                    aligned=self.align is not None, video_t=round(self.video_t, 1))
         self.snapshots.append(row)
+        if (label or "").lower().startswith("prev"):            # start of run: recipe that ran before this session
+            from demo.live_inspect import srgb_lin
+            od = -np.log(np.clip(srgb_lin(m["liquid_rgb"]) / srgb_lin(m["paper_rgb"]), 1e-4, None))
+            name = label[4:].strip(" :-") or "previous recipe"
+            self.prev_refs = [p for p in self.prev_refs if p[0] != name] + [(name, od, lab)]
+            with self.lock:
+                self.ins.add_previous_recipe(name, od, lab)
+            self.log("previous_recipe", detail=name)
         path = os.path.join(self.out_dir, "snapshots.csv")
         new = not os.path.exists(path)
         with open(path, "a", newline="") as f:

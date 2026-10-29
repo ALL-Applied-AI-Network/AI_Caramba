@@ -167,4 +167,4 @@ Pause / Resume and the speed box work for videos. A `raw_camera_*.mp4` replays w
 
 ---
 
-**What's in this repo:** `melting-rainbow/` = our station and analysis code (see `melting-rainbow/operator_ui/README.txt` for how each part works and where every number comes from). `windows/` = double-click launchers. `train.py`, `evaluate.py`, `split_dataset.py` = Frank's EfficientNet recipe-classifier pipeline.
+**What's in this repo:** `melting-rainbow/` = our station and analysis code (see `melting-rainbow/operator_ui/README.txt` for how each part works and where every number comes from). `windows/` = double-click launchers. `frank_recipe_classifier/` = Frank's EfficientNet recipe-classifier pipeline. `docs/` = results and how it works. `archive/` = early experiments.
