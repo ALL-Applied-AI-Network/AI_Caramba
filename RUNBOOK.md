@@ -113,11 +113,11 @@ Fill one vial. When it appears in the list on the right, click its picture to zo
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | 20 | 0 | 0 | 50 | 70 | Dark blue | DB | G1 | start |
 
-Example: [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (21 vials, 8 recipes, ~20 min). Start with
+Example: [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (30 vials, 10 recipes, ~28 min). Start with
 
 `./start_capture.sh --plan runs/2026-10-30_plan.csv`
 
-- Each vial is tagged with its planned recipe and mL; the page shows **"Next on the line: vial N of 21 — …"**.
+- Each vial is tagged with its planned recipe and mL; the page shows **"Next on the line: vial N of 30 — …"**.
 - **Groups:** vials with the same `group` are judged together and the group's **last vial is its clean reference** — so groups can be any size (not just 3). Without a `group` column, a new group starts whenever the mL change.
 - The line skipped a planned vial → press **▶**; it filled an extra vial → press **◀** (keeps the plan lined up with the real vials).
 - Mixed groups (e.g. known mixes judged against one clean vial) need the `group` column.
@@ -133,7 +133,7 @@ Example: [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (21 vials, 8 rec
 
 ## 8. Known-mix vials (optional)
 
-**Easiest: put them in the plan** (vials 19–21, the last group of [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv)): the line itself dispenses light yellow with exactly 10 % and 20 % dark blue, then a clean light yellow as the group's reference. Nothing to do by hand. **By hand instead:**
+**Easiest: put them in the plan** (vials 27–30, the last group of [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv)): the line itself dispenses light yellow with exactly 10 % and 20 % dark blue, then two light yellows — the last one is the group's clean reference. Run a light-yellow group right before them (vials 25–26) so leftover in the lines is the same base color and the 10 % / 20 % stay exact. Nothing to do by hand. **By hand instead:**
 
 For checking the "% leftover" estimate against the truth. Fill to ≥ 60 mL, stir well, place in the holder, wait 5 s, type a label, press **Measure vial in holder**:
 
