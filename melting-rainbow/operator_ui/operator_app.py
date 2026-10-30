@@ -307,6 +307,12 @@ class Engine:
         self.out_dir = os.path.abspath(args.out)
         os.makedirs(self.out_dir, exist_ok=True)
         self.log_path = os.path.join(self.out_dir, "operator_log.csv")
+        old = os.path.join(self.out_dir, "operator_results.csv")   # results of an earlier run: keep, never overwrite
+        if os.path.exists(old):
+            keep = os.path.join(self.out_dir, time.strftime("operator_results_until_%Y%m%d_%H%M%S.csv",
+                                                            time.localtime(os.path.getmtime(old))))
+            if not os.path.exists(keep):
+                os.rename(old, keep)
         self.align_path = os.path.join(self.out_dir, "camera_align.json")
         if os.path.exists(self.align_path):                     # alignment saved earlier in this output folder
             try:
@@ -916,8 +922,10 @@ class Engine:
     def _write_results(self):
         rows = self.snapshot()["vials"]
         if rows:
-            with open(os.path.join(self.out_dir, "operator_results.csv"), "w", newline="") as f:
-                w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
+            stamp = os.path.basename(self.session_path)[8:-5] if self.session_path else time.strftime("%Y%m%d_%H%M%S")
+            for name in ("operator_results.csv", f"operator_results_{stamp}.csv"):   # latest + one per run
+                with open(os.path.join(self.out_dir, name), "w", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
             self._write_run_log(rows)
 
     def _write_run_log(self, rows):

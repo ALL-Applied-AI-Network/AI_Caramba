@@ -12,6 +12,27 @@ Typed commands are in `grey boxes`. Everything else is explanation.
 
 ---
 
+## Run-day checklist — CSI computer (already set up), do these in order
+
+For a person **or an AI assistant (Claude Code / Codex) on the CSI computer**. Do not change code, settings or files; do not pass `--plan` (the station is **never given the recipes**). Commands run in the repo folder.
+
+1. **USB stick in first** (≥ 2 GB free), before anything is started.
+2. Get the latest version: `git pull` → then `git log --oneline -1` (should be the newest commit on GitHub).
+3. Start the station: `./start_capture.sh` — the terminal must say **"Results will be copied to the USB stick after every Stop: /media/…"** (if it says "No USB stick found": press Ctrl+C, plug the stick in, start again). The page opens at `http://localhost:8765` and the camera starts on its own.
+   - Earlier results are kept automatically (`operator_results.csv` from an earlier run becomes `operator_results_until_<date>.csv`) — nothing to copy by hand.
+4. **Check the picture** (step 6 below): vial holder visible, the yellow box sits on the liquid in front of the white paper. Shifted view → **Align camera** (step 5). Leave the recipe dropdown empty.
+5. Press **Stop** (ends this check; it is saved separately and does not mix with the real run).
+6. When the line is flushed and the vials are entered: leave **"Record screen with Start"** ticked → press **Start** → the browser asks what to share → pick this tab / the browser window / the entire screen → **Share**. Under the picture it must say **"● screen recording → screen_….webm · N MB saved"** with N going up. (Screen recording won't start? Untick the box and press Start anyway — the run does not depend on it; record with Ubuntu's recorder instead, step 8b.)
+7. **During the run** (every 3 vials = one batch, the batch's last vial is its reference):
+   - batch shorter than 3 → **New batch now** right after its last vial;
+   - after a **PULL** → **Save last 30 s**;
+   - **REVIEW** → click the picture to zoom → **Pass** / **Reject**; then **Release batch** / **Hold batch**;
+   - don't touch the camera, lights or settings.
+8. After the last vial's result: **Stop** → wait for **"screen recording saved: …"** and **"copied … file(s) to /media/…"**.
+9. Check the stick has `operator_output/` with `raw_camera_*.mp4`, `run_annotated_*.mp4`, `screen_*.webm`, `run_log_*.csv`, `session_*.json`, `operator_results_*.csv`. Then unplug.
+
+---
+
 ## 1. Get the code (once)
 
 Open a terminal (**Windows:** Start → type `cmd` → Command Prompt. **Linux:** Terminal).
