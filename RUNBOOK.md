@@ -21,7 +21,7 @@ For a person **or an AI assistant (Claude Code / Codex) on the CSI computer**. D
 3. Start the station: `./start_capture.sh` — the terminal must say **"Results will be copied to the USB stick after every Stop: /media/…"** (if it says "No USB stick found": press Ctrl+C, plug the stick in, start again). The page opens at `http://localhost:8765` and the camera starts on its own.
    - Earlier results are kept automatically (`operator_results.csv` from an earlier run becomes `operator_results_until_<date>.csv`) — nothing to copy by hand.
 4. **Check the picture** (step 6 below): vial holder visible, the yellow box sits on the liquid in front of the white paper. Shifted view → **Align camera** (step 5). Leave the recipe dropdown empty.
-5. Press **Stop** (ends this check; it is saved separately and does not mix with the real run).
+5. **USB + screen-recording rehearsal (≈ 1 min, before any real vial):** press **Stop** → wait for **"copied … file(s) to /media/…"**. Then, with **"Record screen with Start"** ticked, press **Start** → share the screen → wait ~30 s until "N MB saved" is above 0 → press **Stop** → wait for **"screen recording saved: …"** and **"copied … file(s) to /media/…"**. Open the stick in the file manager: the folder `operator_output/` must contain a `screen_*.webm` and `raw_camera_*.mp4` (a few MB each). **Not there → stop and fix it now** ("If something goes wrong" below); the rehearsal is saved separately and does not mix with the real run.
 6. When the line is flushed and the vials are entered: leave **"Record screen with Start"** ticked → press **Start** → the browser asks what to share → pick this tab / the browser window / the entire screen → **Share**. Under the picture it must say **"● screen recording → screen_….webm · N MB saved"** with N going up. (Screen recording won't start? Untick the box and press Start anyway — the run does not depend on it; record with Ubuntu's recorder instead, step 8b.)
 7. **During the run** (every 3 vials = one batch, the batch's last vial is its reference):
    - batch shorter than 3 → **New batch now** right after its last vial;
@@ -239,6 +239,8 @@ Saved to `results/operator_output/clips/` (`clip_<time>.mp4`, `last30s_<time>.mp
 | Black picture / wrong camera | Step 4 |
 | Vials not being detected | Check step 6 (camera view). The detector needs the vial column below the holder in view and a still camera |
 | Station window closed by accident | Start it again (step 3). Alignment is remembered; a new raw video starts |
+| No **"copied … to /media/…"** after Stop, or **COPY FAILED** | Everything is still in `results/operator_output/`. Check the stick is mounted: `ls /media/$USER/` (unplug + replug, wait 5 s). Then copy by hand: `cp -r results/operator_output /media/$USER/<stick name>/`. Stick full or read-only → use another stick. Restart `./start_capture.sh` after replugging so the automatic copy is on again |
+| Screen recording "not started" / red SCREEN RECORDING PROBLEM | The run is not affected. Untick "Record screen with Start", Start anyway; backup: Ubuntu recorder (step 8b) or the phone |
 | Camera can't be set up at all | Film the vial + white paper with a phone on a stand for the whole run (landscape, don't touch it) and keep the paper log — the system can be run on that video afterwards |
 
 ## Run on a recorded video (practice / afterwards)
