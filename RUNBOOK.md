@@ -5,7 +5,7 @@ Typed commands are in `grey boxes`. Everything else is explanation.
 
 | | |
 |---|---|
-| What it does | Watches the vial-fill camera, finds each fill, compares every vial with its batch's clean vial, shows **PASS / PULL / REVIEW** on a web page, saves everything |
+| What it does | Watches the vial-fill camera, finds each fill, compares every vial with its batch's clean vial, shows **PASS / PULL / REVIEW** on a web page, saves everything — including every operator Pass / Reject as a training example ([step 10](#10-retrain-between-shifts-the-flywheel)) |
 | Needs | Python 3.10+, internet once (for `git clone` + `pip`), a camera that sees the vial holder with the white paper behind it |
 | Time to set up | ~10 min (most of it is `pip install`) |
 | Where results go | `results/operator_output/` inside the repo folder |
@@ -21,6 +21,14 @@ Open a terminal (**Windows:** Start → type `cmd` → Command Prompt. **Linux:*
 `cd melting-rainbow-repo`
 
 No git on the computer? On the GitHub page: green **Code** button → **Download ZIP** → unzip → open a terminal in that folder.
+
+**Until the flywheel is merged into `main`:** switch to its branch before starting the station:
+
+`git fetch origin flywheel-safe-retrain`
+
+`git checkout flywheel-safe-retrain`
+
+Check with `git branch` — the line with `*` must say `flywheel-safe-retrain`. (ZIP instead: on GitHub pick the branch in the branch menu first, then **Code → Download ZIP**.) Already have the repo? Run the two lines in it, then `git pull`.
 
 ## 2. Install Python packages (once)
 
@@ -127,6 +135,7 @@ Example: [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (30 vials, 10 re
 **During the run (both ways):**
 
 - When a group finishes, each vial shows **PASS → good**, **PULL → scrap** (with likely cause and leftover %), or **REVIEW** (look, then click Pass / Reject). Then **Release batch** or **Hold batch**.
+- **Every Pass / Reject click is saved as a training label** (`results/operator_output/flywheel/`). Click what you actually see in the zoom view, not what the station said. Settle every REVIEW — those are the most useful examples. Clicked the wrong one? Click the right one; the last click counts. Nothing is trained during the run.
 - If the line's Teledyne color check shows a pass/fail, click under each vial what it said (**good / scrap**) — that is the baseline. If there is no Teledyne decision, skip those buttons.
 - On paper, per vial: number, recipe, time, tinted by eye (Y/N), anything odd.
 - Don't change settings mid-run.
@@ -193,6 +202,7 @@ Saved to `results/operator_output/clips/` (`clip_<time>.mp4`, `last30s_<time>.mp
 | `operator_log.csv` | every event and click with time (start, recipe changes, batch results, Pass/Reject, Release/Hold, clips, copies) |
 | `session_<time>.json` | the whole run: start / stop time, camera settings (resolution, fps, exposure, white balance), alignment, plan, recipes per batch, "prev" recipe, counts, video file names, software version (git commit) |
 | `raw_camera_*.mp4`, `run_annotated_*.mp4`, `clips/`, `snapshots/` | videos and pictures (step 8b) |
+| `flywheel/examples.csv` + `flywheel/images/` | one row per operator Pass / Reject: label, what the station said (status, ΔE, AI %), and the vial + reference frames (PNG, ~0.5 MB per vial). Input for step 10. Turn off with `--no-examples` |
 
 ## 9. Finish — don't skip
 
@@ -204,6 +214,7 @@ Saved to `results/operator_output/clips/` (`clip_<time>.mp4`, `last30s_<time>.mp
    - `camera_align.json`, `snapshots.csv`, `snapshots/` (if used)
    - `clips/` — the clips from **Record clip** / **Save last 30 s**
    - `run_annotated_*.mp4` — the whole run with the status bar (for the video)
+   - `flywheel/` — the operator's Pass / Reject clicks as training examples (step 10). **Keep each run's folder separate** (e.g. rename to `operator_output_2026-10-30`) so runs can be told apart later.
    - Already on the USB stick if one was plugged in at start (step 8c) — check the page says "copied …".
 3. Photo of the paper notes.
 4. Don't leave our results on the CSI computer if they ask you not to: delete `results/` after copying (ask staff first).
@@ -219,7 +230,56 @@ Saved to `results/operator_output/clips/` (`clip_<time>.mp4`, `last30s_<time>.mp
 | Black picture / wrong camera | Step 4 |
 | Vials not being detected | Check step 6 (camera view). The detector needs the vial column below the holder in view and a still camera |
 | Station window closed by accident | Start it again (step 3). Alignment is remembered; a new raw video starts |
+| `example_error` in `operator_log.csv` | a click couldn't be saved as an example (e.g. disk full). The station keeps running and the click still counts on the page; free space and keep going |
+| Don't want clicks saved (e.g. a practice run) | add `--no-examples` to the start command |
 | Camera can't be set up at all | Film the vial + white paper with a phone on a stand for the whole run (landscape, don't touch it) and keep the paper log — the system can be run on that video afterwards |
+
+## 10. Retrain between shifts (the flywheel)
+
+The station **never changes its own model while the line runs.** Between shifts, the clicks from step 7 are used to train a new model, and it only replaces the current one if it is **at least as good** on a fixed test set. Details: [`melting-rainbow/flywheel/README.md`](melting-rainbow/flywheel/README.md).
+
+**Where:** any computer — a laptop CPU takes ~5 min per retrain (2,000 twin images + your examples). It does **not** have to be the CSI computer. Needs the venv from step 2 plus:
+
+`pip install pandas`
+
+**What you need** (from the team Drive, `01 Team Handoff`):
+
+| | Where | Unzip to |
+|---|---|---|
+| Twin dataset | `04_twin_datasets/twin_dataset_v2.zip` | `twin_dataset_v2/` |
+| Video 5 test pack | `03_validation_video5/video5_eval.zip` | `video5_eval/` |
+| Run results | each run's `results/operator_output` folder (USB stick / Drive) | anywhere |
+
+**1. Dry run — nothing changes** (Linux shown; on Windows use `\` and `python`):
+
+`python3 melting-rainbow/flywheel/retrain.py --twin twin_dataset_v2 --gate-pack video5_eval --examples operator_output_2026-10-30`
+
+- More runs: list them all after `--examples`.
+- The terminal prints a table, also saved as `results/flywheel_models/retrain_report_<time>.md`:
+
+| Gate set | Vials | Off-color | Current: misses / false alarms | Candidate: misses / false alarms |
+|---|---|---|---|---|
+| video5 | 20 | 10 | 0 / 1 | 0 / 1 |
+
+- Last line says **PASSED the gate** (candidate no worse on misses AND false alarms) or **KEPT the current model** (candidate was worse — nothing to do, try again after more runs).
+
+**2. Use the new model** — only after a PASSED dry run, same command plus `--promote`:
+
+`python3 melting-rainbow/flywheel/retrain.py --twin twin_dataset_v2 --gate-pack video5_eval --examples operator_output_2026-10-30 --promote`
+
+- It trains again, re-checks the gate, and only if it passes replaces `melting-rainbow/operator_ui/pair_model.pt`. The old model goes to `results/flywheel_models/history/pair_model_replaced_<time>.pt`.
+- The station uses the new model from its **next Start** (restart `./start_capture.sh`). The page pill shows `AI on: pair_model.pt (small)`.
+- Write in the run log which report promoted it, and commit the new `pair_model.pt` (79 KB) with the report's numbers in the message so everyone runs the same model.
+
+**3. Undo** (station looks worse on the line): copy the old model back, then restart the station:
+
+`cp results/flywheel_models/history/pair_model_replaced_<time>.pt melting-rainbow/operator_ui/pair_model.pt` (Windows: `copy`)
+
+**Keep the test honest**
+
+- Once there are a few runs, keep one aside as extra test data: `--gate-examples operator_output_<that run>`. It is **never** trained on (the script refuses if the same vial is in both lists), so the gate checks real line data, not just video 5.
+- Don't promote on a run with few clicks and a lucky table: 20 test vials catch a model that got clearly worse, not small differences.
+- Only the PASS / PULL decision learns from clicks. The leftover % does not (no true leftover is known for real vials).
 
 ## Run on a recorded video (practice / afterwards)
 
