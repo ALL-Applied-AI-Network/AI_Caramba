@@ -88,7 +88,7 @@ footer a{color:var(--accent)}
 .lane button.sel{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 .vrow img{cursor:zoom-in}
 .vrow img:hover{outline:2px solid var(--accent)}
-#prog[hidden]{display:none}
+#prog[hidden],.recipebar[hidden]{display:none}
 #prog{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--muted)}
 #prog .bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
 #prog .bar i{display:block;height:100%;width:0;background:var(--accent)}
@@ -153,6 +153,7 @@ button.paused{background:var(--review-bg);color:var(--review);border-color:var(-
     <input id="src" placeholder="camera number, /dev/v4l/by-id path, or video file">
     <label for="bs">Vials / batch</label><input id="bs" type="number" min="1" value="3">
     <label for="sp">Speed</label><input id="sp" type="number" min="0.25" step="0.25" value="8" title="video files only">
+    <label title="When you press Start the browser asks what to share - pick this tab or the entire screen. Stop ends it. Saved into the results folder (and copied to the USB stick)."><input type="checkbox" id="scrWithStart" checked> Record screen with Start</label>
     <button class="primary" id="startBtn">Start</button>
     <button id="pauseBtn" title="Video files: freeze here, then continue from the same spot">Pause</button>
     <button id="stopBtn" title="End the run (Start begins again from the start)">Stop</button>
@@ -168,11 +169,13 @@ button.paused{background:var(--review-bg);color:var(--review);border-color:var(-
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="clipBtn" title="Record a video clip of this view (separate from Start/Stop)">● Record clip</button>
         <button id="replayBtn" title="Save the last 30 seconds as a clip - for when something happens before you hit record">Save last 30 s</button>
+        <button id="scrBtn" title="Record this screen to the results folder (saved every 2 s; copied to the USB stick after Stop)">● Record screen</button>
         <button class="big" id="newBatch" title="Press at a recipe change to end the current batch early">New batch now</button>
       </div>
     </div>
     <div id="prog" hidden><span id="ptime"></span><span class="bar"><i id="pbar"></i></span></div>
     <div class="why" id="clipMsg" style="margin-top:6px"></div>
+    <div class="why" id="scrMsg" style="margin-top:6px"></div>
     <div class="why" id="cur" style="margin-top:6px"></div>
     <div class="recipebar" id="planbar" hidden>
       <label>Next on the line</label>
@@ -287,12 +290,75 @@ function showSource(src){
   if (isCam) configuredCamera = src;
 }
 
-$("#startBtn").onclick = () => {
+// ---- screen recording: the browser records the screen; every 2 s a piece is sent to the station and written to
+// results/<out>/screen_<time>.webm right away (nothing is lost if the browser or computer crashes).
+// Stop finishes the recording BEFORE the run stops, so the copy to the USB stick gets the whole file.
+const scr = {rec:null, stream:null, name:"", q:Promise.resolve(), bytes:0, t0:0, fail:"", timer:null};
+function scrShow(){
+  const b = $("#scrBtn"), on = !!scr.rec;
+  b.textContent = on ? `■ Stop screen (${fmt((Date.now()-scr.t0)/1000)})` : "● Record screen";
+  b.className = on ? "rec" : "";
+  const m = $("#scrMsg");
+  if (scr.fail) { m.innerHTML = `<b style="color:#e5484d">SCREEN RECORDING PROBLEM: ${scr.fail}</b>`; return; }
+  if (on) m.textContent = `● screen recording → ${scr.name} · ${(scr.bytes/1e6).toFixed(1)} MB saved`;
+}
+async function scrStart(){
+  if (scr.rec) return true;
+  scr.fail = "";
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:10}, audio:false, preferCurrentTab:true});
+  } catch (e) {
+    $("#scrMsg").textContent = "screen recording not started (" + (e.name || e) + ") - the run itself is not affected";
+    return false;
+  }
+  const types = ["video/webm;codecs=vp8","video/webm;codecs=vp9","video/webm","video/mp4"];
+  const mime = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+  let rec;
+  try { rec = new MediaRecorder(stream, mime ? {mimeType:mime, videoBitsPerSecond:1500000} : {videoBitsPerSecond:1500000}); }
+  catch (e) { stream.getTracks().forEach(t => t.stop()); $("#scrMsg").textContent = "screen recording not supported in this browser: " + e; return false; }
+  const r = await post("/screenstart", {mime: rec.mimeType || mime});
+  Object.assign(scr, {rec, stream, name:r.name, q:Promise.resolve(), bytes:0, t0:Date.now()});
+  rec.ondataavailable = ev => {
+    if (!ev.data || !ev.data.size) return;
+    const blob = ev.data, name = scr.name;
+    scr.q = scr.q.then(() => fetch("/screenchunk?name=" + encodeURIComponent(name), {method:"POST", body:blob}))
+      .then(res => res.json()).then(j => { if (j.ok) scr.bytes = j.bytes; else scr.fail = "station refused a piece"; })
+      .catch(e => { scr.fail = "could not save a piece (" + e + ")"; });
+  };
+  stream.getVideoTracks()[0].addEventListener("ended", () => scrStop());   // "Stop sharing" in the browser bar
+  rec.start(2000);
+  scr.timer = setInterval(scrShow, 1000); scrShow();
+  return true;
+}
+function scrStop(){
+  if (!scr.rec) return Promise.resolve();
+  const rec = scr.rec, name = scr.name;
+  return new Promise(resolve => {
+    rec.onstop = () => {
+      scr.q.then(() => post("/screenstop", {name})).then(r => {
+        clearInterval(scr.timer); scr.rec = null; scr.stream = null; scrShow();
+        $("#scrMsg").textContent = r.msg + (scr.fail ? " - BUT " + scr.fail : ""); resolve();
+      }).catch(() => { scr.rec = null; resolve(); });
+    };
+    try { rec.stop(); } catch (e) { rec.onstop(); }
+    scr.stream && scr.stream.getTracks().forEach(t => t.stop());
+  });
+}
+window.addEventListener("beforeunload", e => { if (scr.rec) { e.preventDefault(); e.returnValue = ""; } });
+$("#scrBtn").onclick = () => scr.rec ? scrStop() : scrStart();
+
+$("#startBtn").onclick = async () => {
   // empty box -> the station's default (the video or camera it was launched with)
   const src = $("#src").value.trim();
+  if ($("#scrWithStart").checked && !scr.rec) await scrStart();   // browser asks what to share (needs this click)
   post("/start",{source:src,batch_size:$("#bs").value,speed:$("#sp").value}).then(refresh);
 };
-$("#stopBtn").onclick = () => post("/stop").then(refresh);
+$("#stopBtn").onclick = async () => {
+  $("#stopBtn").disabled = true;
+  if (scr.rec) { $("#scrMsg").textContent = "finishing the screen recording ..."; await scrStop(); }
+  post("/stop").then(refresh);
+};
 $("#planBack").onclick = () => post("/planshift",{delta:-1}).then(r => { $("#clipMsg").textContent = r.msg; refresh(); });
 $("#planFwd").onclick = () => post("/planshift",{delta:1}).then(r => { $("#clipMsg").textContent = r.msg; refresh(); });
 $("#clipBtn").onclick = () => post("/clip",{on: !(lastState && lastState.clip_on)}).then(r => { $("#clipMsg").textContent = r.msg; refresh(); });
@@ -333,6 +399,7 @@ function render(s){
   $("#state").textContent = s.state; $("#src2").textContent = s.source ? "— " + s.source : "";
   $("#cur").textContent = s.running ? `Current batch ${s.current_batch}: ${s.in_batch} of ${s.batch_size} vials` : "";
   $("#startBtn").disabled = s.running; $("#stopBtn").disabled = !s.running;
+  if (lastState && lastState.running && !s.running && scr.rec) scrStop();
   lastState = s; paused = s.paused;
   const cb = $("#clipBtn"); cb.disabled = !s.running; $("#replayBtn").disabled = !s.running;
   cb.textContent = s.clip_on ? `■ Stop clip (${fmt(s.clip_s)})` : "● Record clip";

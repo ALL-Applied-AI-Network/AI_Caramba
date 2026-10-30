@@ -294,6 +294,9 @@ class Engine:
         self.plan, self.plan_recipes = self._load_plan(args.plan)   # run plan: one row per vial (+ mL per tank)
         self.camera_settings, self.session_path, self.session = {}, "", {}
         self.copy_status = ""                                   # auto-copy after Stop (--copy-to / --after-stop)
+        # screen recording of this page (browser records the screen, sends a piece every 2 s, saved as it arrives)
+        self.screen_lock = threading.Lock()
+        self.screen_path, self.screen_bytes, self.screen_files = "", 0, []
         self.paused = False
         self.is_file = False
         self.speed = args.speed
@@ -357,6 +360,42 @@ class Engine:
         self.running = False
         self.paused = False
         return "stopping"
+
+    # ---- screen recording (the page records the screen; pieces are appended to one file as they arrive)
+    def screen_start(self, mime):
+        ext = ".mp4" if "mp4" in str(mime) else ".webm"
+        with self.screen_lock:
+            name = time.strftime("screen_%Y%m%d_%H%M%S") + ext
+            self.screen_path, self.screen_bytes = os.path.join(self.out_dir, name), 0
+            open(self.screen_path, "wb").close()
+            self.screen_files.append(name)
+        self.log("screen_start", detail=f"{name} ({mime})")
+        return name
+
+    def screen_chunk(self, name, data):
+        with self.screen_lock:
+            if not self.screen_path or os.path.basename(self.screen_path) != name:
+                return False
+            with open(self.screen_path, "ab") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())                           # on disk now, even if the computer crashes later
+            self.screen_bytes += len(data)
+            return True
+
+    def screen_stop(self, name):
+        with self.screen_lock:
+            if not self.screen_path or os.path.basename(self.screen_path) != name:
+                return "no screen recording"
+            mb = self.screen_bytes / 1e6
+            self.screen_path = ""
+        self.log("screen_saved", detail=f"{name} {mb:.1f} MB")
+        msg = f"screen recording saved: {name} ({mb:.0f} MB)"
+        if self.session_path:
+            self._write_session(final=not self.running)
+        if not self.running and (self.args.copy_to or self.args.after_stop):   # run already stopped: copy again
+            threading.Thread(target=self._copy_out, daemon=True).start()
+        return msg
 
     def pause(self, on):
         if not self.running:
@@ -538,7 +577,7 @@ class Engine:
                  pulled=sum(ins.final_status(k) == "REJECT" for k in range(len(ins.vials))),
                  review=sum(ins.final_status(k) == "REVIEW" for k in range(len(ins.vials))),
                  raw_video=os.path.basename(self.raw_path), run_video=os.path.basename(self.run_video),
-                 snapshots=len(self.snapshots))
+                 snapshots=len(self.snapshots), screen_videos=list(self.screen_files))
         with open(self.session_path, "w") as f:
             json.dump(s, f, indent=1, default=str)
 
@@ -1033,6 +1072,11 @@ def make_handler(engine):
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length", 0) or 0)
+            if self.path.startswith("/screenchunk"):            # raw video bytes from the page's screen recorder
+                from urllib.parse import urlparse, parse_qs
+                name = (parse_qs(urlparse(self.path).query).get("name") or [""])[0]
+                ok = engine.screen_chunk(name, self.rfile.read(n))
+                return self._send(200 if ok else 409, json.dumps({"ok": ok, "bytes": engine.screen_bytes}))
             d = json.loads(self.rfile.read(n) or b"{}")
             if self.path == "/start":
                 src = d.get("source") or engine.args.video or str(engine.args.camera)
@@ -1049,6 +1093,10 @@ def make_handler(engine):
                 msg = engine.plan_shift(d.get("delta", 0))
             elif self.path == "/clip":
                 msg = engine.request_clip(bool(d.get("on")))
+            elif self.path == "/screenstart":
+                return self._send(200, json.dumps({"name": engine.screen_start(d.get("mime", ""))}))
+            elif self.path == "/screenstop":
+                msg = engine.screen_stop(d.get("name", ""))
             elif self.path == "/replay":
                 msg = engine.request_replay()
             elif self.path == "/speed":

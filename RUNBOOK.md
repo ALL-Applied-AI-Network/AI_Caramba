@@ -156,11 +156,18 @@ Sizes measured on the organizers' 640×480 video (raw ≈ 6.7 MB/min, annotated 
 
 Saved to `results/operator_output/clips/` (`clip_<time>.mp4`, `last30s_<time>.mp4`, about 12 frames/s). The run keeps going; a clip still recording when you press Stop is saved.
 
-**Screen recording of the whole page** (for the "operator using the station" shot):
+**Screen recording of the page — built in, saved with everything else:**
 
-- **CSI computer (Linux / Ubuntu):** press **Print Screen** → in the bar that opens, switch to the **video camera** icon → pick the screen or window → **Record**. Stop with the red button at the top right of the screen. Saved to `~/Videos/Screencasts/`. Older systems: **Ctrl + Alt + Shift + R** starts / stops (may stop on its own after 30 s).
-- **Windows:** **Win + Alt + R** starts / stops (Xbox Game Bar, saved to `Videos\Captures`), or Snipping Tool → **Record**.
-- Copy the screen recordings off the computer together with `results/operator_output` (step 9).
+1. Leave **"Record screen with Start"** ticked (top bar, on by default).
+2. `start_capture.sh` starts the camera right away — use that to check the picture, then press **Stop**.
+3. When the line is ready, press **Start**. The browser asks what to share: pick **this tab** (Chrome) or the **browser window / entire screen** (Firefox / Ubuntu dialog) → **Share**.
+4. Check the line under the picture: **"● screen recording → screen_….webm · N MB saved"** — N must keep going up.
+5. **Stop** first finishes the screen recording ("screen recording saved: …"), then stops the run, then copies everything to the USB stick (step 8c).
+
+- Saved as `results/operator_output/screen_<time>.webm`, written to disk every 2 seconds — if the browser or computer crashes, everything up to then is kept. About 5 MB per minute (≤ 340 MB for 30 min).
+- **● Record screen** (next to the clip buttons) starts / stops it by hand at any time.
+- Said "not started" or shows a red **SCREEN RECORDING PROBLEM**? The run itself is not affected — use the Ubuntu recorder below as a backup (and keep the phone filming).
+- Backup, Ubuntu's own recorder: **Print Screen** → video camera icon → **Record**; red button top right stops it; saved to `~/Videos/Screencasts/` (copy it to the stick by hand). Windows: **Win + Alt + R**.
 
 ## 8c. Copy the results to a USB stick automatically
 
@@ -184,7 +191,7 @@ Saved to `results/operator_output/clips/` (`clip_<time>.mp4`, `last30s_<time>.mp
 | `run_log_<time>.csv` | **our run-log sheet, filled in automatically**: vial, group, recipe, mL, purpose, time, what the station said (+ ΔE, AI %, cause, leftover, fill). Only "Tinted by eye" and "Notes" are left to fill by hand — open it from the USB stick, or paste it into the Drive run-log sheet |
 | `operator_log.csv` | every event and click with time (start, recipe changes, batch results, Pass/Reject, Release/Hold, clips, copies) |
 | `session_<time>.json` | the whole run: start / stop time, camera settings (resolution, fps, exposure, white balance), alignment, plan, recipes per batch, "prev" recipe, counts, video file names, software version (git commit) |
-| `raw_camera_*.mp4`, `run_annotated_*.mp4`, `clips/`, `snapshots/` | videos and pictures (step 8b) |
+| `raw_camera_*.mp4`, `run_annotated_*.mp4`, `screen_*.webm`, `clips/`, `snapshots/` | videos and pictures (step 8b) |
 
 ## 9. Finish — don't skip
 
