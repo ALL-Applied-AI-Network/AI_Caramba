@@ -36,6 +36,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from demo.live_inspect import Inspector, holder_present, steady_frames, auto_ml, liquid_score   # noqa: E402
 from lane2_color.detect_fills_level import LevelFillDetector, level_label, level_pct, final_level   # noqa: E402
+from flywheel.examples import save_example   # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -295,6 +296,7 @@ class Engine:
         self.camera_settings, self.session_path, self.session = {}, "", {}
         self.copy_status = ""                                   # auto-copy after Stop (--copy-to / --after-stop)
         self.paused = False
+        self._first_status = {}                                 # vial -> what the station said before any click
         self.is_file = False
         self.speed = args.speed
         self.clock_reset = False                                # set when speed changes / resume -> re-time playback
@@ -344,6 +346,7 @@ class Engine:
         self.last_source = str(source)
         self.paused, self.speed = False, speed
         self.ins = OperatorInspector(batch_size, self.ai, self.args.tol)
+        self._first_status = {}
         for name, od, lab in self.prev_refs:                     # keep the start-of-run reference across Stop/Start
             self.ins.add_previous_recipe(name, od, lab)
         self.ins.plan = self.plan                                # planned recipe per vial (operator can adjust)
@@ -618,12 +621,37 @@ class Engine:
         with self.lock:
             if vial is not None:
                 k = int(vial) - 1
+                before = self.ins.final_status(k) if k not in self.ins.decisions else None
                 self.ins.decisions[k] = action
                 self.log("vial_decision", self.ins.batch_of.get(k, ""), vial, action)
+                self._save_example(k, action, before)
             elif batch:
                 self.ins.decisions[batch] = action
                 self.log("batch_decision", batch, "", action)
         return "ok"
+
+    def _save_example(self, k, action, station_status):
+        """Flywheel: keep the operator's Pass / Reject as a labeled example (vial + reference frame). Used only by
+        flywheel/retrain.py between shifts - nothing is trained while the line runs. Never stops the station."""
+        if self.args.no_examples:
+            return
+        try:
+            ins = self.ins
+            idx = next((b for b in ins.batches if k in b), None)
+            if idx is None or k == idx[-1] or k not in ins.results:
+                return
+            if station_status is None:                     # operator changed an earlier click: keep what the
+                station_status = self._first_status.get(k, "")   # station itself said, not the earlier click
+            self._first_status.setdefault(k, station_status)
+            run_id = os.path.basename(self.session_path)[8:-5] if self.session_path else time.strftime("%Y%m%d_%H%M%S")
+            batch = ins.batch_of.get(k, "")
+            path = save_example(self.out_dir, run_id, k + 1, idx[-1] + 1, batch, action, station_status,
+                                ins.vials[k], ins.vials[idx[-1]], ins.results[k], self._batch_recipe_name(batch),
+                                time.strftime("%Y-%m-%d %H:%M:%S"))
+            if path:
+                self.log("example_saved", batch, k + 1, f"{action} ({station_status})")
+        except Exception as e:                             # saving an example must never break the station
+            self.log("example_error", "", k + 1, f"{type(e).__name__}: {e}")
 
     # ---- loop
     def _run(self, source, speed):
@@ -1079,6 +1107,8 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--autostart", action="store_true", help="start right away (video if given, else camera)")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--no-examples", action="store_true",
+                    help="don't save Pass / Reject clicks as training examples (flywheel; saved by default)")
     ap.add_argument("--no-record", action="store_true",
                     help="don't save the camera videos (raw + annotated full-run video are saved by default)")
     ap.add_argument("--copy-to", help="after every Stop, copy the output folder here (e.g. a USB stick or synced folder)")

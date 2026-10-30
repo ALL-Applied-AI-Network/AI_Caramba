@@ -134,7 +134,9 @@ def load_model(path, device="cpu"):
 def fit(data, epochs=25, seed=0, arch="small", pretrained=True, relative=False, freeze=False, color_jitter=0.0):
     torch.manual_seed(seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    A, B, y, w = data
+    A, B, y, w = data[:4]
+    # optional 5th item: 1 where the leftover target is known (twin), 0 where it isn't (real operator examples)
+    m = data[4] if len(data) > 4 else torch.ones_like(w)
     net = make_net(arch, pretrained, relative, freeze).to(dev)
     params = [q for q in net.parameters() if q.requires_grad]
     opt = torch.optim.Adam(params, 2e-3) if arch == "small" else torch.optim.AdamW(params, 1e-3 if freeze else 3e-4)
@@ -153,9 +155,9 @@ def fit(data, epochs=25, seed=0, arch="small", pretrained=True, relative=False, 
             # real camera) but not the difference, so the model has to judge the difference
             gc = (1 + color_jitter * torch.randn(len(i), 3, 1, 1)).clamp(0.3, 3) if color_jitter else 1.0
             logit, wl = net((A[i] * ga * gc).to(dev), (B[i] * gb * gc).to(dev))
-            yi, wi = y[i].to(dev), w[i].to(dev)
-            loss = nn.functional.binary_cross_entropy_with_logits(logit, yi, pos_weight=pw) \
-                + 2.0 * nn.functional.mse_loss(wl, wi)
+            yi, wi, mi = y[i].to(dev), w[i].to(dev), m[i].to(dev)
+            mse = ((wl - wi) ** 2 * mi).sum() / mi.sum().clamp(min=1.0)    # = mse_loss when every target is known
+            loss = nn.functional.binary_cross_entropy_with_logits(logit, yi, pos_weight=pw) + 2.0 * mse
             opt.zero_grad(); loss.backward(); opt.step()
     return net.eval().cpu()
 
