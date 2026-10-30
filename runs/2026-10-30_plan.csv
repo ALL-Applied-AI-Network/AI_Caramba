@@ -23,9 +23,9 @@ vial,clear_ml,yellow_ml,red_ml,blue_ml,total_ml,color,code,group,purpose
 22,45,15,10,0,70,Peach,PE,G8,HIGH carryover risk: purple -> pale
 23,45,15,10,0,70,Peach,PE,G8,
 24,45,15,10,0,70,Peach,PE,G8,clean reference (last of group)
-25,50,20,0,0,70,Light yellow,LY,G9,low risk: peach -> light yellow (also flushes the lines before the known mixes)
-26,50,20,0,0,70,Light yellow,LY,G9,clean reference (last of group)
-27,47,18,0,5,70,Light yellow + 10% dark blue (known mix),K10,G10,leftover check: exactly 10% dark blue
-28,44,16,0,10,70,Light yellow + 20% dark blue (known mix),K20,G10,leftover check: exactly 20% dark blue
-29,50,20,0,0,70,Light yellow,LY,G10,light yellow after the known mixes
-30,50,20,0,0,70,Light yellow,LY,G10,clean reference for the known mixes (last of group)
+25,50,20,0,0,70,Light yellow,LY,G9,low risk: peach -> light yellow (flushes the lines before the known mixes)
+26,50,20,0,0,70,Light yellow,LY,G9,
+27,50,20,0,0,70,Light yellow,LY,G9,clean light yellow = reference for the known-mix check
+28,47,18,0,5,70,Light yellow + 10% dark blue (known mix),K10,G10,known mix: 10% dark blue (scored vs vial 27)
+29,44,16,0,10,70,Light yellow + 20% dark blue (known mix),K20,G10,known mix: 20% dark blue (scored vs vial 27)
+30,50,20,0,0,70,Light yellow,LY,G10,light yellow (station reference for this batch; may be tinted by vial 29)

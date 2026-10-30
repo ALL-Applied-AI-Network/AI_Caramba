@@ -107,24 +107,16 @@ Fill one vial. When it appears in the list on the right, click its picture to zo
 
 ## 7. Run batches
 
-**With a run plan (recommended):** a CSV with **one row per vial, in fill order** — the first columns are exactly what is typed into the line:
+**Default — the station is never told the recipe:** `./start_capture.sh`
 
-| vial | clear_ml | yellow_ml | red_ml | blue_ml | total_ml | color | code | group | purpose |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | 20 | 0 | 0 | 50 | 70 | Dark blue | DB | G1 | start |
+- Every **3 vials is one batch** (the "Vials / batch" box); the batch's **last vial is its clean reference**. That is all the station knows — not what the recipe is or what color it should be.
+- Leave the recipe dropdown empty.
+- A batch was shorter than 3 → press **New batch now** right after its last vial.
+- Keep **your own record** of what was filled (recipe and mL per vial), e.g. [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (30 vials, 10 recipes, 10 batches of 3, ~28 min). It is used only **afterwards**, to score the run — it is not given to the station.
 
-Example: [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (30 vials, 10 recipes, ~28 min). Start with
+**Optional — with a run plan** (only where giving the station the recipe list is allowed): `./start_capture.sh --plan <plan.csv>`, one row per vial in fill order (`vial, clear_ml, yellow_ml, red_ml, blue_ml, …, group`). The page then shows "Next on the line: vial N"; vials with the same `group` are one batch, so batches can be any size; **▶ / ◀** fix a skipped / extra vial.
 
-`./start_capture.sh --plan runs/2026-10-30_plan.csv`
-
-- Each vial is tagged with its planned recipe and mL; the page shows **"Next on the line: vial N of 30 — …"**.
-- **Groups:** vials with the same `group` are judged together and the group's **last vial is its clean reference** — so groups can be any size (not just 3). Without a `group` column, a new group starts whenever the mL change.
-- The line skipped a planned vial → press **▶**; it filled an extra vial → press **◀** (keeps the plan lined up with the real vials).
-- Mixed groups (e.g. known mixes judged against one clean vial) need the `group` column.
-
-**Without a plan:** every N vials (the "Vials / batch" box) is one group, the recipe is picked in the dropdown at each change, and **New batch now** ends a group early.
-
-**During the run (both ways):**
+**During the run:**
 
 - When a group finishes, each vial shows **PASS → good**, **PULL → scrap** (with likely cause and leftover %), or **REVIEW** (look, then click Pass / Reject). Then **Release batch** or **Hold batch**.
 - If the line's Teledyne color check shows a pass/fail, click under each vial what it said (**good / scrap**) — that is the baseline. If there is no Teledyne decision, skip those buttons.
@@ -133,7 +125,7 @@ Example: [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv) (30 vials, 10 re
 
 ## 8. Known-mix vials (optional)
 
-**Easiest: put them in the plan** (vials 27–30, the last group of [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv)): the line itself dispenses light yellow with exactly 10 % and 20 % dark blue, then two light yellows — the last one is the group's clean reference. Run a light-yellow group right before them (vials 25–26) so leftover in the lines is the same base color and the 10 % / 20 % stay exact. Nothing to do by hand. **By hand instead:**
+**Easiest: have the line fill them** (vials 28–29 of [`runs/2026-10-30_plan.csv`](runs/2026-10-30_plan.csv)): light yellow with exactly 10 % and 20 % dark blue, right after three light yellows (25–27) so the lines hold the same base color. Afterwards they are scored against vial 27 (a clean light yellow) — nothing to do by hand during the run. **By hand instead:**
 
 For checking the "% leftover" estimate against the truth. Fill to ≥ 60 mL, stir well, place in the holder, wait 5 s, type a label, press **Measure vial in holder**:
 
