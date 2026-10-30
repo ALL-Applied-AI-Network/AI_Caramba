@@ -57,6 +57,7 @@ Full details, where each number comes from, and scope / next steps: [docs/RESULT
 | [`melting-rainbow/lane2_color/`](melting-rainbow/lane2_color) | Fill detection (finds each vial and its fill level) |
 | [`melting-rainbow/common/`](melting-rainbow/common) | How a vial's color is measured (liquid ÷ white paper) |
 | [`melting-rainbow/lane6_classifier/`](melting-rainbow/lane6_classifier) | The rule, the AI comparison model (training + tests), video 5 scoring |
+| [`melting-rainbow/flywheel/`](melting-rainbow/flywheel) | **Learns from the line, safely:** operator Pass / Reject clicks become labeled examples; a gated retrain between shifts only replaces the model if it's no worse ([how](melting-rainbow/flywheel/README.md)) |
 | [`melting-rainbow/lane4_twin/`](melting-rainbow/lane4_twin) | Isaac Sim digital twin: renders the 2,000 training images |
 | [`start_capture.sh`](start_capture.sh) | One-command start on the CSI computer (set up with CSI staff) |
 | [`windows/`](windows) | Double-click launchers for Windows; `isaac_twin/` = twin rendering launchers |

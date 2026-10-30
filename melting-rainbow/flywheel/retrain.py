@@ -148,7 +148,7 @@ def main():
                "KEPT the current model - the candidate was worse on the gate set")
     report = dict(time=stamp, current=os.path.abspath(a.current), candidate=cand_path, arch=arch,
                   twin_pairs=len(twin[2]), real_examples=n_real, real_repeat=a.real_repeat,
-                  gate_sets={k: v["n"] for k, v in sets.items()}, current_scores=s_cur, candidate_scores=s_cand,
+                  gate_sets={k: len(v[2]) for k, v in sets.items()}, current_scores=s_cur, candidate_scores=s_cand,
                   passed=passed, promoted=promoted, verdict=verdict,
                   rule="candidate misses <= current misses AND candidate false alarms <= current false alarms")
     with open(os.path.join(a.out_dir, f"retrain_report_{stamp}.json"), "w") as f:
