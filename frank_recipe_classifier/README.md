@@ -1,7 +1,7 @@
-# Recipe classifier (EfficientNet-B0) — Frank Hejl
+# Recipe classifier (EfficientNet-B0)
 
 Our first AI approach: classify which recipe a vial image shows, then flag a vial as off-color when the predicted
-recipe differs from the planned one. Trained on the DGX Spark.
+recipe differs from the planned one. Trained on Rosie, MSOE's supercomputer.
 
 | File | What it does |
 |---|---|

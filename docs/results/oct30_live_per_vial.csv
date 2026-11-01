@@ -1,0 +1,16 @@
+vial,batch,planned recipe (v7),clear mL,red-tank mL,blue mL,first vial after a recipe change,color seen in camera frame,station's own call (batch_done log),final (after operator),dE vs batch reference,AI % off,likely cause,leftover %,fill reading,"fill start (CSI clock, UTC)","vial left (CSI clock, UTC)"
+1,B1,Dark blue,20,0,50,,"light blue, low (underfilled)",REVIEW (fill line below color window),PULL,43.1,,,,partial fill (line at 39% of the visible vial),2026-10-30 23:58:35,2026-10-30 23:58:42
+2,B1,Dark blue,20,0,50,,green,PULL,PULL,61.2,100,start of run (no earlier batch to compare),,high fill (line behind the holder),2026-10-30 23:59:25,2026-10-30 23:59:55
+3,B1,Dark blue,20,0,50,,blue,reference,reference,0.0,,,,high fill (line behind the holder),2026-10-31 00:00:37,2026-10-31 00:01:07
+4,B2,Light 'red',50,20,0,yes,teal-green,PULL,PULL,60.0,100,B1,36,high fill (line behind the holder),2026-10-31 00:03:21,2026-10-31 00:04:07
+5,B2,Light 'red',50,20,0,,"amber, darker than 6 (?)",PASS,PASS,2.4,4,,1,high fill (line behind the holder),2026-10-31 00:04:42,2026-10-31 00:05:27
+6,B2,Light 'red',50,20,0,,amber,reference,reference,0.0,,,,high fill (line behind the holder),2026-10-31 00:06:02,2026-10-31 00:06:48
+7,B3,'Red',20,50,0,yes,"orange, lighter than 9",PULL,PULL,10.9,51,B2,84,high fill (line behind the holder),2026-10-31 00:07:29,2026-10-31 00:08:08
+8,B3,'Red',20,50,0,,orange-red,PASS,PASS,5.5,7,,0,high fill (line behind the holder),2026-10-31 00:08:47,2026-10-31 00:09:28
+9,B3,'Red',20,50,0,,orange-red,reference,reference,0.0,,,,high fill (line behind the holder),2026-10-31 00:10:08,2026-10-31 00:10:50
+10,B4,Light blue,50,0,20,yes,olive,PULL,PULL,86.3,100,B3,37,high fill (line behind the holder),2026-10-31 00:11:30,2026-10-31 00:12:09
+11,B4,Light blue,50,0,20,,cyan,PASS,PASS,2.0,46,,1,high fill (line behind the holder),2026-10-31 00:12:50,2026-10-31 00:13:28
+12,B4,Light blue,50,0,20,,cyan,reference,reference,0.0,,,,high fill (line behind the holder),2026-10-31 00:14:09,2026-10-31 00:14:47
+13,B5,'Purple',10,30,30,yes,amber-orange,PULL,PULL,43.7,100,B2,25,high fill (line behind the holder),2026-10-31 00:15:30,2026-10-31 00:16:09
+14,B5,'Purple',10,30,30,,olive,REVIEW,PASS,7.1,28,B2,3,high fill (line behind the holder),2026-10-31 00:16:46,2026-10-31 00:17:30
+15,B5,'Purple',10,30,30,,olive,reference,reference,0.0,,,,high fill (line behind the holder),2026-10-31 00:18:06,2026-10-31 00:18:50
